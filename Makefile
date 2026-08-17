@@ -1,7 +1,14 @@
 BIN_NAME := wtf
 INSTALL_BIN := $(HOME)/.local/bin/$(BIN_NAME)
-UNIT_NAME := $(BIN_NAME).service
+# The "app-" prefix is required: xdg-desktop-portal derives the portal
+# app id for unsandboxed processes from the systemd user unit name
+# (unit must be app-<appid>[@...].service), then loads <appid>.desktop.
+# Without it GlobalShortcuts fails with "An app id is required".
+UNIT_NAME := app-$(BIN_NAME).service
+OLD_UNIT_NAME := $(BIN_NAME).service
 UNIT_DIR := $(HOME)/.config/systemd/user
+DESKTOP_DIR := $(HOME)/.local/share/applications
+ICON_DIR := $(HOME)/.local/share/icons/hicolor/128x128/apps
 RELEASE_BIN := src-tauri/target/release/$(BIN_NAME)
 
 .PHONY: dev build smoke install enable check clean npm-install
@@ -27,6 +34,11 @@ check:
 install: build
 	install -Dm755 $(RELEASE_BIN) $(INSTALL_BIN)
 	install -Dm644 assets/$(UNIT_NAME) $(UNIT_DIR)/$(UNIT_NAME)
+	install -Dm644 assets/wtf.desktop $(DESKTOP_DIR)/wtf.desktop
+	install -Dm644 src-tauri/icons/icon.png $(ICON_DIR)/wtf.png
+	# One-time migration from the pre-portal unit name.
+	-systemctl --user disable --now $(OLD_UNIT_NAME) 2>/dev/null
+	-rm -f $(UNIT_DIR)/$(OLD_UNIT_NAME)
 	systemctl --user daemon-reload
 	@echo "Installed. Start it (now + on login) with: make enable"
 

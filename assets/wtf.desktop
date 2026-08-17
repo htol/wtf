@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=wtf
+Comment=Local voice-to-text dictation
+Exec=wtf
+Icon=wtf
+Terminal=false
+Categories=Utility;
+# xdg-desktop-portal resolves the app id for the GlobalShortcuts portal by
+# matching the requesting process against this entry (StartupWMClass/Exec).
+StartupWMClass=wtf
