@@ -1,0 +1,37 @@
+[package]
+name = "wtf"
+version = "0.1.0"
+description = "Local voice-to-text dictation"
+edition = "2021"
+
+[features]
+default = ["asr"]
+# Production build: embed the frontend dist into the binary. Without this
+# (plain `cargo build --release`) the binary starts in dev mode and tries to
+# load http://localhost:5173 -> "Connection refused" in the window.
+prod = ["tauri/custom-protocol"]
+# ASR backend (whisper.cpp). CPU-only unless a GPU backend feature is added.
+asr = ["dep:whisper-rs"]
+asr-cuda = ["asr", "whisper-rs/cuda"]
+asr-vulkan = ["asr", "whisper-rs/vulkan"]
+
+[lib]
+name = "wtf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }
+cpal = "0.16"
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "6"
+whisper-rs = { version = "0.16", optional = true }
+
+[profile.release]
+strip = true
+lto = true
