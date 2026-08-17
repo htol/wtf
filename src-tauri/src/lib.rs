@@ -14,6 +14,28 @@ mod models;
 mod settings;
 mod tray;
 
+/// Registers the global shortcuts and forwards every activation into the
+/// app as a `shortcut` event (payload: shortcut id). Runs on the tauri
+/// (tokio) runtime for the lifetime of the daemon.
+fn spawn_hotkeys(app: tauri::AppHandle) {
+	tauri::async_runtime::spawn(async move {
+		let globals = match hotkey::register().await {
+			Ok(globals) => globals,
+			Err(e) => {
+				eprintln!("hotkey: portal registration failed: {e}");
+				return;
+			}
+		};
+		let emit = |id: &str| {
+			eprintln!("hotkey activated: {id}");
+			let _ = tauri::Emitter::emit(&app, "shortcut", id.to_string());
+		};
+		if let Err(e) = hotkey::listen(&globals, emit).await {
+			eprintln!("hotkey: activation stream ended: {e}");
+		}
+	});
+}
+
 pub fn run() {
 	tauri::Builder::default()
 		// Dictation daemon lives in the tray: closing the settings window
@@ -26,9 +48,10 @@ pub fn run() {
 		})
 		.setup(|app| {
 			tray::init(app)?;
-			// TODO: spawn hotkey::register() on the tokio runtime and wire
-			// record-toggle -> audio::Recorder -> asr::Transcriber -> inject::paste
-			// -> history::insert; create the overlay window (hidden).
+			spawn_hotkeys(app.handle().clone());
+			// TODO: wire record toggle -> audio::Recorder -> asr::Transcriber
+			// -> inject::paste -> history::insert; create the overlay window
+			// (hidden).
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![

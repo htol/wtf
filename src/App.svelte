@@ -1,9 +1,30 @@
 <script lang="ts">
+	import { listen } from '@tauri-apps/api/event';
+	import { onMount } from 'svelte';
 	import Settings from './lib/Settings.svelte';
 	import History from './lib/History.svelte';
 
 	type Tab = 'settings' | 'history';
 	let tab: Tab = $state('settings');
+	// Step-1 wiring check: `record` toggles the indicator (press-to-toggle,
+	// DESIGN.md "Pipeline"); other shortcuts show as the last action.
+	let recording = $state(false);
+	let lastAction = $state<string | null>(null);
+
+	onMount(() => {
+		const unlisten = listen<string>('shortcut', (event) => {
+			const at = new Date().toLocaleTimeString();
+			if (event.payload === 'record') {
+				recording = !recording;
+				lastAction = `record ${recording ? 'started' : 'stopped'} at ${at}`;
+			} else {
+				lastAction = `${event.payload} at ${at}`;
+			}
+		});
+		return () => {
+			unlisten.then((u) => u());
+		};
+	});
 </script>
 
 <div class="root">
@@ -18,6 +39,15 @@
 			<History />
 		{/if}
 	</main>
+	<footer>
+		{#if recording}
+			<span class="accent">● recording</span> — press the hotkey again to stop
+		{:else if lastAction}
+			{lastAction}
+		{:else}
+			Hotkeys armed — press a global shortcut to test
+		{/if}
+	</footer>
 </div>
 
 <style>
@@ -51,5 +81,16 @@
 		flex: 1;
 		overflow-y: auto;
 		padding: 16px;
+	}
+
+	footer {
+		padding: 6px 12px;
+		background: var(--nord1);
+		color: var(--nord3);
+		font-size: 12px;
+	}
+
+	footer .accent {
+		color: var(--nord8);
 	}
 </style>

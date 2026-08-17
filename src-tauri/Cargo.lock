@@ -4992,6 +4992,7 @@ dependencies = [
  "ashpd",
  "cpal",
  "dirs",
+ "futures-util",
  "rusqlite",
  "serde",
  "serde_json",

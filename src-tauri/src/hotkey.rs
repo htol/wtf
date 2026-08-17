@@ -4,12 +4,9 @@
 //! Design (DESIGN.md, "Pipeline"): press-to-toggle record; a second global
 //! shortcut cycles the dictation language. Plasma 6 shows a native binding
 //! dialog on first registration.
-//!
-//! TODO: after `register()`, spawn a task looping over
-//! `globals.receive_activated()` and forward each `Activated::shortcut_id()`
-//! into the app (toggle recording / cycle language).
 
 use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
+use futures_util::StreamExt;
 
 pub const SHORTCUT_RECORD: &str = "record";
 pub const SHORTCUT_CYCLE_LANGUAGE: &str = "cycle-language";
@@ -32,4 +29,18 @@ pub async fn register() -> Result<GlobalShortcuts, ashpd::Error> {
 		.await?;
 	request.response()?;
 	Ok(globals)
+}
+
+/// Calls `on_activation(shortcut_id)` for every shortcut activation until the
+/// session ends. Runs forever on success; the portal session stays alive as
+/// long as `globals` is kept alive by the caller.
+pub async fn listen<F>(globals: &GlobalShortcuts, mut on_activation: F) -> Result<(), ashpd::Error>
+where
+	F: FnMut(&str),
+{
+	let mut activations = globals.receive_activated().await?;
+	while let Some(activated) = activations.next().await {
+		on_activation(activated.shortcut_id());
+	}
+	Ok(())
 }
