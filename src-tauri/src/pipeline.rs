@@ -34,6 +34,7 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 	let mut slot = state.recorder.lock().unwrap();
 	if let Some(recorder) = slot.take() {
 		drop(slot); // don't hold the lock while stopping the stream
+		crate::tray::set_recording(app, false);
 		let _ = app.emit("recording", false);
 		let app = app.clone();
 		tauri::async_runtime::spawn_blocking(move || {
@@ -57,6 +58,7 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 	match audio::Recorder::start() {
 		Ok(recorder) => {
 			*slot = Some(recorder);
+			crate::tray::set_recording(app, true);
 			let _ = app.emit("recording", true);
 		}
 		Err(e) => {
