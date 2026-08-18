@@ -43,9 +43,12 @@ fn set_clipboard(text: &str) -> Result<(), String> {
 	Ok(())
 }
 
-fn press_ctrl_v() -> Result<(), String> {
-	// evdev keycodes: KEY_LEFTCTRL=29, KEY_V=47; 1 = press, 0 = release.
-	run(&["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])?;
+fn press_paste() -> Result<(), String> {
+	// evdev keycodes: KEY_LEFTSHIFT=42, KEY_INSERT=110; 1 = press, 0 = release.
+	// Shift+Insert instead of Ctrl+V: V translates to a Cyrillic keysym under
+	// a Russian layout (Ctrl+М), which apps' Ctrl+V bindings never match;
+	// Shift and Insert are layout-invariant and paste in terminals, GTK, Qt.
+	run(&["ydotool", "key", "42:1", "110:1", "110:0", "42:0"])?;
 	Ok(())
 }
 
@@ -54,7 +57,7 @@ fn press_ctrl_v() -> Result<(), String> {
 pub fn paste(text: &str) -> Result<(), String> {
 	let saved = run(&["wl-paste", "--no-newline"]).ok();
 	set_clipboard(text)?;
-	press_ctrl_v()?;;
+	press_paste()?;;
 	std::thread::sleep(RESTORE_DELAY);
 	if let Some(previous) = saved {
 		set_clipboard(&previous)?;
