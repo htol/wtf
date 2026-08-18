@@ -63,17 +63,31 @@
 
 	// Model and GPU pickers save immediately: a choice without a download
 	// (or vice versa) would otherwise leave the active model ambiguous.
+	// Each write re-fetches settings and copies only the fields this tab
+	// owns: writing a stale full copy would wipe slices other tabs own
+	// (prompts, overlay position).
+	async function persistOwn() {
+		if (!settings) return;
+		const current = await invoke<Settings>('get_settings');
+		current.language = settings.language;
+		current.gpu_device = settings.gpu_device;
+		current.use_gpu = settings.use_gpu;
+		current.model_path = settings.model_path;
+		current.model_id = settings.model_id;
+		await invoke('set_settings', { settings: current });
+	}
+
 	async function pickModel(id: string | null) {
 		if (!settings) return;
 		settings.model_id = id;
-		await invoke('set_settings', { settings });
+		await persistOwn();
 		await refreshModels();
 	}
 
 	async function pickGpu(index: number) {
 		if (!settings) return;
 		settings.gpu_device = index;
-		await invoke('set_settings', { settings });
+		await persistOwn();
 	}
 
 	async function download() {
@@ -101,7 +115,7 @@
 
 	async function save() {
 		if (!settings) return;
-		await invoke('set_settings', { settings });
+		await persistOwn();
 		savedAt = new Date().toLocaleTimeString();
 		await refreshModels();
 	}

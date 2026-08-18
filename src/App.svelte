@@ -3,8 +3,9 @@
 	import { onMount } from 'svelte';
 	import Settings from './lib/Settings.svelte';
 	import History from './lib/History.svelte';
+	import Prompts from './lib/Prompts.svelte';
 
-	type Tab = 'settings' | 'history';
+	type Tab = 'history' | 'prompts' | 'settings';
 	let tab: Tab = $state('history');
 	// Recording state is owned by the backend pipeline; the footer mirrors
 	// it from `recording` events.
@@ -43,13 +44,16 @@
 <div class="root">
 	<nav>
 		<button class:active={tab === 'history'} onclick={() => (tab = 'history')}>History</button>
+		<button class:active={tab === 'prompts'} onclick={() => (tab = 'prompts')}>Prompts</button>
 		<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
 	</nav>
 	<main>
-		{#if tab === 'settings'}
-			<Settings />
-		{:else}
+		{#if tab === 'history'}
 			<History />
+		{:else if tab === 'prompts'}
+			<Prompts />
+		{:else}
+			<Settings />
 		{/if}
 	</main>
 	<footer>
@@ -73,6 +77,10 @@
 		flex-direction: column;
 		height: 100%;
 	}
+
+
+
+
 
 	nav {
 		display: flex;

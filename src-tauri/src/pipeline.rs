@@ -146,10 +146,15 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 		"auto" => None,
 		code => Some(code),
 	};
-	let text = transcribe_cached(app, &model, samples, language)?;
+	let prompt = settings
+		.active_prompt
+		.as_ref()
+		.and_then(|name| settings.prompts.iter().find(|p| &p.name == name))
+		.map(|p| p.text.as_str());
+	let (text, lang) = transcribe_cached(app, &model, samples, language, prompt)?;
 	inject::paste(&text)?;
 	let conn = history::open()?;
-	history::insert(&conn, &text, language.unwrap_or("auto"))?;
+	history::insert(&conn, &text, &lang)?;
 	let _ = app.emit("transcript", &text);
 	Ok(())
 }
@@ -159,7 +164,8 @@ fn transcribe_cached(
 	model: &std::path::Path,
 	samples: &[f32],
 	language: Option<&str>,
-) -> Result<String, String> {
+	initial_prompt: Option<&str>,
+) -> Result<(String, String), String> {
 	let settings = settings::load();
 	let state = app.state::<Dictation>();
 	let mut cached = state.transcriber.lock().unwrap();
@@ -178,5 +184,5 @@ fn transcribe_cached(
 		.as_ref()
 		.expect("transcriber was just stored")
 		.1
-		.transcribe(samples, language)
+		.transcribe(samples, language, initial_prompt)
 }

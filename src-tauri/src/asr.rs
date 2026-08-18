@@ -60,7 +60,16 @@ impl Transcriber {
 	}
 
 	/// `samples`: 16 kHz mono f32. `language`: language code, "auto", or None.
-	pub fn transcribe(&self, samples: &[f32], language: Option<&str>) -> Result<String, String> {
+	/// `initial_prompt`: optional decoder conditioning text (style/vocabulary
+	/// bias, e.g. code-switching examples); no instructions are understood.
+	/// Returns the transcript and the effective language code (forced or
+	/// detected).
+	pub fn transcribe(
+		&self,
+		samples: &[f32],
+		language: Option<&str>,
+		initial_prompt: Option<&str>,
+	) -> Result<(String, String), String> {
 		let mut params =
 			whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
 		let language = match language {
@@ -68,6 +77,9 @@ impl Transcriber {
 			some => some,
 		};
 		params.set_language(language);
+		if let Some(prompt) = initial_prompt {
+			params.set_initial_prompt(prompt);
+		}
 		let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
 		state
 			.full(params, samples)
@@ -79,7 +91,30 @@ impl Transcriber {
 				out.push_str(segment.to_str().map_err(|e| e.to_string())?);
 			}
 		}
-		Ok(out.trim().to_string())
+		let lang = match language {
+			Some(code) => code.to_string(),
+			None => lang_code(state.full_lang_id_from_state()),
+		};
+		Ok((out.trim().to_string(), lang))
+	}
+}
+
+/// Whisper language ids (whisper.cpp `g_lang` ordering) -> ISO codes.
+const LANG_CODES: &[&str] = &[
+	"en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar",
+	"sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu",
+	"ta", "no", "th", "ur", "hr", "bg", "lt", "la",
+];
+
+/// Maps a whisper language id to its ISO code ("auto" when detection
+/// did not run, `id:N` for ids outside the table above).
+fn lang_code(id: i32) -> String {
+	match id {
+		-1 => "auto".into(),
+		i => LANG_CODES
+			.get(i as usize)
+			.map(|code| code.to_string())
+			.unwrap_or_else(|| format!("id:{i}")),
 	}
 }
 
@@ -92,7 +127,12 @@ impl Transcriber {
 		Err("built without the `asr` feature".into())
 	}
 
-	pub fn transcribe(&self, _samples: &[f32], _language: Option<&str>) -> Result<String, String> {
+	pub fn transcribe(
+		&self,
+		_samples: &[f32],
+		_language: Option<&str>,
+		_initial_prompt: Option<&str>,
+	) -> Result<(String, String), String> {
 		Err("built without the `asr` feature".into())
 	}
 }

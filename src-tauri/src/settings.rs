@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_id;
 
+/// A named whisper initial prompt (decoder conditioning text; see
+/// asr::Transcriber::transcribe).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NamedPrompt {
+	pub name: String,
+	pub text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -17,6 +25,9 @@ pub struct Settings {
 	pub model_path: Option<String>,
 	/// Chosen model id (see models::MODEL_CHOICES); None = most recent download.
 	pub model_id: Option<String>,
+	/// Named initial prompts; `active_prompt` names the one in use (None = off).
+	pub prompts: Vec<NamedPrompt>,
+	pub active_prompt: Option<String>,
 	/// Overlay position as fractions of the screen (x, y).
 	pub overlay_x: f64,
 	pub overlay_y: f64,
@@ -30,6 +41,12 @@ impl Default for Settings {
 			use_gpu: true,
 			model_path: None,
 			model_id: None,
+			prompts: vec![NamedPrompt {
+				name: "ru-en mix".into(),
+				text: "Сегодня у нас meeting по архитектуре, я закинул PR и обновил roadmap. "
+					.into(),
+			}],
+			active_prompt: None,
 			overlay_x: 0.5,
 			// DESIGN.md: initial indicator position = 20% from bottom.
 			overlay_y: 0.8,
