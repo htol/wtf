@@ -5,6 +5,7 @@
 //! accumulating sample buffer; `stop()` drops the stream and returns the
 //! samples resampled to 16 kHz mono.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Averages interleaved multi-channel samples into a mono signal.
@@ -123,11 +124,13 @@ mod tests {
 }
 
 /// Opens an input stream whose callback converts interleaved frames to
-/// mono f32 and appends them to the shared buffer.
+/// mono f32 and appends them to the shared buffer, publishing the chunk RMS
+/// to the level meter for the overlay.
 fn open_stream<T>(
 	device: &cpal::Device,
 	config: &cpal::StreamConfig,
 	samples: Arc<Mutex<Vec<f32>>>,
+	level: Arc<AtomicU32>,
 	channels: usize,
 ) -> Result<cpal::Stream, String>
 where
@@ -139,8 +142,11 @@ where
 
 	let data = move |data: &[T], _: &cpal::InputCallbackInfo| {
 		let converted: Vec<f32> = data.iter().map(|&s| f32::from_sample(s)).collect();
+		let mono = to_mono(&converted, channels);
+		let rms = (mono.iter().map(|s| s * s).sum::<f32>() / mono.len().max(1) as f32).sqrt();
+		level.store((rms.min(1.0) * 1e6) as u32, Ordering::Relaxed);
 		let mut buffer = samples.lock().unwrap();
-		buffer.extend(to_mono(&converted, channels));
+		buffer.extend(mono);
 	};
 	device
 		.build_input_stream::<T, _, _>(config, data, |e| eprintln!("audio input error: {e}"), None)
@@ -150,6 +156,7 @@ where
 pub struct Recorder {
 	stream: cpal::Stream,
 	samples: Arc<Mutex<Vec<f32>>>,
+	level: Arc<AtomicU32>,
 	sample_rate: u32,
 }
 
@@ -171,11 +178,18 @@ impl Recorder {
 			buffer_size: cpal::BufferSize::Default,
 		};
 		let samples = Arc::new(Mutex::new(Vec::new()));
+		let level = Arc::new(AtomicU32::new(0));
 		// Dispatch over the runtime sample format to the generic stream
 		// builder; one arm per `SampleFormat` variant.
 		macro_rules! open {
 			($sample:ty) => {
-				open_stream::<$sample>(&device, &config, Arc::clone(&samples), channels as usize)
+				open_stream::<$sample>(
+					&device,
+					&config,
+					Arc::clone(&samples),
+					Arc::clone(&level),
+					channels as usize,
+				)
 			};
 		}
 		let stream = match supported.sample_format() {
@@ -196,8 +210,14 @@ impl Recorder {
 		Ok(Self {
 			stream,
 			samples,
+			level,
 			sample_rate: sample_rate.0,
 		})
+	}
+
+	/// RMS of the most recent audio chunk, 0.0..=1.0 (for the overlay meter).
+	pub fn level(&self) -> f32 {
+		self.level.load(Ordering::Relaxed) as f32 / 1e6
 	}
 
 	/// Stops recording and returns captured samples at 16 kHz mono f32.

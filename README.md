@@ -26,6 +26,36 @@ make clean      # clean cargo + vite artifacts
   the portal derives the app id for unsandboxed apps from the `app-*`
   user-unit name plus a matching desktop file.
 
+## Wayland notes
+
+- The recording overlay needs a KWin window rule: xdg-shell has no
+  keep-above, so `alwaysOnTop` from the app is ignored. Add to
+  `~/.config/kwinrulesrc` (and `qdbus org.kde.KWin /KWin reconfigure` or
+  re-login — KWin applies rules when a window is created, so restart the
+  service afterwards):
+
+  ```ini
+  [General]
+  rules=1
+
+  [1]
+  Description=wtf overlay: keep above, skip taskbar and switcher, remember position
+  title=wtf-overlay
+  titlematch=1
+  above=true
+  aboverule=3
+  skiptaskbar=true
+  skiptaskbarrule=3
+  skipswitcher=true
+  skipswitcherrule=3
+  positionrule=2
+  types=1
+  ```
+
+  Every property needs its paired `*rule=3` (Force) field; without them KWin
+  silently ignores the rule. `positionrule=2` (Remember) makes KWin store the
+  overlay position — client-side positioning is impossible on Wayland.
+
 ## NVIDIA note
 
 WebKitGTK's DMA-BUF renderer crashes with `Error 71 (Protocol error)` on the

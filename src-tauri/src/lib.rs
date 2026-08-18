@@ -44,23 +44,31 @@ fn spawn_hotkeys(app: tauri::AppHandle) {
 pub fn run() {
 	tauri::Builder::default()
 		// Dictation daemon lives in the tray: closing the settings window
-		// hides it instead of exiting the app (Quit lives in the tray menu).
+		// hides it instead of exiting the app (Quit lives in the tray menu);
+		// the overlay is never closable, only shown/hidden by the pipeline.
 		.on_window_event(|window, event| {
 			if let tauri::WindowEvent::CloseRequested { api, .. } = event {
 				api.prevent_close();
-				let _ = window.hide();
+				if window.label() != "overlay" {
+					let _ = window.hide();
+				}
 			}
 		})
 		.setup(|app| {
 			use tauri::Manager;
 			tray::init(app)?;
 			app.manage(pipeline::Dictation::new());
+			// Keep the overlay mapped (1x1 invisible) from startup: on Wayland
+			// every show() of an unmapped window can activate it and steal
+			// focus from the dictation target, while resizes never do.
+			pipeline::prime_overlay(app.handle());
 			spawn_hotkeys(app.handle().clone());
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
 			settings::get_settings,
 			settings::set_settings,
+			settings::set_overlay_position,
 			history::list_history,
 			history::delete_history,
 			models::list_models,

@@ -43,11 +43,12 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 				.stop()
 				.map_err(|e| format!("record stop failed: {e}"))
 				.and_then(|samples| {
-				let _ = app.emit("processing", true);
-				let result = transcribe_and_paste(&app, &samples);
-				let _ = app.emit("processing", false);
-				result
-			});
+					let _ = app.emit("processing", true);
+					let result = transcribe_and_paste(&app, &samples);
+					let _ = app.emit("processing", false);
+					result
+				});
+			hide_overlay(&app, outcome.is_err());
 			if let Err(e) = outcome {
 				eprintln!("pipeline failed: {e}");
 				let _ = app.emit("pipeline-error", e);
@@ -59,6 +60,8 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 		Ok(recorder) => {
 			*slot = Some(recorder);
 			crate::tray::set_recording(app, true);
+			show_overlay(app);
+			spawn_level_ticker(app.clone());
 			let _ = app.emit("recording", true);
 		}
 		Err(e) => {
@@ -66,6 +69,65 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 			let _ = app.emit("pipeline-error", format!("record start failed: {e}"));
 		}
 	}
+}
+
+/// Maps the overlay window once and collapses it to an invisible 1x1 so it
+/// never needs show() again (see lib.rs setup note).
+pub fn prime_overlay(app: &tauri::AppHandle) {
+	let Some(window) = app.get_webview_window("overlay") else {
+		return;
+	};
+	let _ = window.set_focusable(false);
+	let _ = window.set_always_on_top(true);
+	let _ = window.show();
+	let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
+	// First map activates the window on Wayland, asynchronously — later than
+	// any immediate set_focus. Hand focus back to the main window after the
+	// dust settles so keystrokes right after login don't vanish into the
+	// overlay.
+	let main = app.get_webview_window("main");
+	std::thread::spawn(move || {
+		std::thread::sleep(std::time::Duration::from_secs(1));
+		if let Some(main) = &main {
+			let _ = main.set_focus();
+		}
+	});
+}
+
+/// Expands the overlay to its recording size. Positioning is left to KWin
+/// (rule "Remember"): Wayland ignores client-side set_position.
+fn show_overlay(app: &tauri::AppHandle) {
+	let Some(window) = app.get_webview_window("overlay") else {
+		return;
+	};
+	let _ = window.set_size(tauri::PhysicalSize::new(260, 30));
+}
+
+/// Collapses the overlay back to 1x1; on error keeps it expanded briefly to
+/// show the message.
+fn hide_overlay(app: &tauri::AppHandle, failed: bool) {
+	let Some(window) = app.get_webview_window("overlay") else {
+		return;
+	};
+	if !failed {
+		let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
+		return;
+	}
+	std::thread::sleep(std::time::Duration::from_millis(2500));
+	let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
+}
+
+/// Emits `level` events (~10 Hz) while a recorder is active.
+fn spawn_level_ticker(app: tauri::AppHandle) {
+	std::thread::spawn(move || loop {
+		std::thread::sleep(std::time::Duration::from_millis(100));
+		let state = app.state::<Dictation>();
+		let guard = state.recorder.lock().unwrap();
+		let Some(recorder) = guard.as_ref() else {
+			break;
+		};
+		let _ = app.emit("level", recorder.level());
+	});
 }
 
 fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), String> {

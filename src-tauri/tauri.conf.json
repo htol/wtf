@@ -6,6 +6,21 @@
 	"app": {
 		"windows": [
 			{
+				"label": "overlay",
+				"title": "wtf-overlay",
+				"url": "overlay.html",
+				"width": 260,
+				"height": 30,
+				"visible": false,
+				"decorations": false,
+				"transparent": true,
+				"shadow": false,
+				"alwaysOnTop": true,
+				"skipTaskbar": true,
+				"resizable": true,
+				"focus": false
+			},
+			{
 				"label": "main",
 				"title": "wtf",
 				"width": 760,

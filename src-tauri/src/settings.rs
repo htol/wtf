@@ -64,3 +64,13 @@ pub fn get_settings() -> Settings {
 pub fn set_settings(settings: Settings) -> Result<(), String> {
 	save(&settings)
 }
+
+/// Persisted overlay position update from the overlay window's own drag
+/// events (fractions of the current monitor).
+#[tauri::command]
+pub fn set_overlay_position(x: f64, y: f64) -> Result<(), String> {
+	let mut settings = load();
+	settings.overlay_x = x;
+	settings.overlay_y = y;
+	save(&settings)
+}
