@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount } from 'svelte';
 	import Settings from './lib/Settings.svelte';
 	import History from './lib/History.svelte';
@@ -39,9 +40,28 @@
 			unlistenProcessing.then((u) => u());
 		};
 	});
+	// Custom frame: the system title bar is disabled (decorations: false);
+	// closing hides the window, the daemon keeps running in the tray.
+	function hideWindow() {
+		getCurrentWindow().hide();
+	}
+	function minimizeWindow() {
+		getCurrentWindow().minimize();
+	}
 </script>
 
 <div class="root">
+	<header class="titlebar" data-tauri-drag-region>
+		<span class="title" data-tauri-drag-region>wtf</span>
+		<div class="controls">
+			<button type="button" class="control" title="Minimize" onclick={minimizeWindow}>
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+			</button>
+			<button type="button" class="control close" title="Hide (Quit lives in the tray)" onclick={hideWindow}>
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+			</button>
+		</div>
+	</header>
 	<nav>
 		<button class:active={tab === 'history'} onclick={() => (tab = 'history')}>History</button>
 		<button class:active={tab === 'prompts'} onclick={() => (tab = 'prompts')}>Prompts</button>
@@ -76,11 +96,53 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		border: 1px solid var(--nord1);
 	}
 
+	.titlebar {
+		display: flex;
+		align-items: center;
+		height: 34px;
+		padding: 0 6px 0 14px;
+		background: var(--nord1);
+		user-select: none;
+		flex-shrink: 0;
+	}
 
+	.title {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--nord8);
+		letter-spacing: 0.06em;
+	}
 
+	.controls {
+		margin-left: auto;
+		display: flex;
+		gap: 2px;
+	}
 
+	.control {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--nord4);
+		border-radius: 4px;
+	}
+
+	.control:hover {
+		background: var(--nord2);
+	}
+
+	.control.close:hover {
+		background: var(--nord11);
+		color: var(--nord6);
+	}
 
 	nav {
 		display: flex;
