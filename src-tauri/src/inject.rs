@@ -54,12 +54,18 @@ fn press_ctrl_v() -> Result<(), String> {
 pub fn paste(text: &str) -> Result<(), String> {
 	let saved = run(&["wl-paste", "--no-newline"]).ok();
 	set_clipboard(text)?;
-	press_ctrl_v()?;
+	press_ctrl_v()?;;
 	std::thread::sleep(RESTORE_DELAY);
 	if let Some(previous) = saved {
 		set_clipboard(&previous)?;
 	}
 	Ok(())
+}
+
+/// Copies `text` to the clipboard (wl-copy, same path as paste uses).
+#[tauri::command]
+pub fn copy_to_clipboard(text: String) -> Result<(), String> {
+	set_clipboard(&text)
 }
 
 #[cfg(test)]

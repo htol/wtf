@@ -29,6 +29,10 @@ serde_json = "1"
 ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }
 cpal = "0.16"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# HTTP is only used for model downloads from huggingface.co; tokio::fs for
+# streaming the response body to disk on the tauri runtime.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+tokio = { version = "1", features = ["fs"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 whisper-rs = { version = "0.16", optional = true }

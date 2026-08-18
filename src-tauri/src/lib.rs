@@ -11,6 +11,7 @@ mod history;
 mod hotkey;
 mod inject;
 mod models;
+mod pipeline;
 mod settings;
 mod tray;
 
@@ -26,8 +27,12 @@ fn spawn_hotkeys(app: tauri::AppHandle) {
 				return;
 			}
 		};
+		let app_for_record = app.clone();
 		let emit = |id: &str| {
 			eprintln!("hotkey activated: {id}");
+			if id == hotkey::SHORTCUT_RECORD {
+				pipeline::toggle_record(&app_for_record);
+			}
 			let _ = tauri::Emitter::emit(&app, "shortcut", id.to_string());
 		};
 		if let Err(e) = hotkey::listen(&globals, emit).await {
@@ -47,17 +52,23 @@ pub fn run() {
 			}
 		})
 		.setup(|app| {
+			use tauri::Manager;
 			tray::init(app)?;
+			app.manage(pipeline::Dictation::new());
 			spawn_hotkeys(app.handle().clone());
-			// TODO: wire record toggle -> audio::Recorder -> asr::Transcriber
-			// -> inject::paste -> history::insert; create the overlay window
-			// (hidden).
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
 			settings::get_settings,
 			settings::set_settings,
-			history::list_history
+			history::list_history,
+			history::delete_history,
+			models::list_models,
+			models::download_model,
+			models::delete_model,
+			models::open_models_dir,
+			inject::copy_to_clipboard,
+			asr::list_gpu_devices
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

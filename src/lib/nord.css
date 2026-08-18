@@ -1,5 +1,10 @@
 /* Nord palette (nordtheme.github.io) */
 :root {
+	/* Native form controls (closed <select>, number inputs) take their
+	 * text color from the GTK theme, not from CSS; declare the dark scheme
+	 * so a light GTK theme does not render near-black text on Nord. */
+	color-scheme: dark;
+
 	--nord0: #2e3440;
 	--nord1: #3b4252;
 	--nord2: #434c5e;

@@ -5,6 +5,44 @@
 //! comes from settings (`gpu_device`). Loading a model is expensive, so
 //! `Transcriber` will be created once and cached in app state.
 
+/// A GPU visible to the ASR backend. `index` is the CUDA ordinal that
+/// whisper's `gpu_device` setting expects; `pci_bus_id` is the bus address.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GpuDevice {
+	pub index: i32,
+	pub name: String,
+	pub pci_bus_id: String,
+}
+
+/// Enumerates NVIDIA GPUs (nvidia-smi ordinal == CUDA device index).
+/// Returns an empty list when nvidia-smi is unavailable.
+#[tauri::command]
+pub fn list_gpu_devices() -> Vec<GpuDevice> {
+	let output = std::process::Command::new("nvidia-smi")
+		.args(["--query-gpu=index,name,pci.bus_id", "--format=csv,noheader"])
+		.output();
+	let Ok(output) = output else {
+		return Vec::new();
+	};
+	if !output.status.success() {
+		return Vec::new();
+	}
+	String::from_utf8_lossy(&output.stdout)
+		.lines()
+		.filter_map(|line| {
+			let mut parts = line.split(", ");
+			let index = parts.next()?.trim().parse().ok()?;
+			let name = parts.next()?.trim().to_string();
+			let pci_bus_id = parts.next().unwrap_or("").trim().to_string();
+			Some(GpuDevice {
+				index,
+			name,
+			pci_bus_id,
+			})
+		})
+		.collect()
+}
+
 #[cfg(feature = "asr")]
 pub struct Transcriber {
 	#[allow(dead_code)] // placeholder until model loading is implemented

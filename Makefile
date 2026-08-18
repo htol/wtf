@@ -19,9 +19,11 @@ npm-install:
 dev: npm-install
 	npm run tauri dev
 
+# Production build: embed the frontend dist into the binary and run ASR on
+# the NVIDIA GPU (cuda backend; runtime device pick via settings.gpu_device).
 build: npm-install
 	npm run build
-	cargo build --release --manifest-path src-tauri/Cargo.toml --features prod
+	cargo build --release --manifest-path src-tauri/Cargo.toml --features prod,asr-cuda
 
 # Validates that cuda + vulkan backends link into one binary (DESIGN.md risk #1).
 smoke: npm-install

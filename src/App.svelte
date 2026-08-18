@@ -5,32 +5,45 @@
 	import History from './lib/History.svelte';
 
 	type Tab = 'settings' | 'history';
-	let tab: Tab = $state('settings');
-	// Step-1 wiring check: `record` toggles the indicator (press-to-toggle,
-	// DESIGN.md "Pipeline"); other shortcuts show as the last action.
+	let tab: Tab = $state('history');
+	// Recording state is owned by the backend pipeline; the footer mirrors
+	// it from `recording` events.
 	let recording = $state(false);
+	let processing = $state(false);
 	let lastAction = $state<string | null>(null);
+	let pipelineError = $state<string | null>(null);
 
 	onMount(() => {
-		const unlisten = listen<string>('shortcut', (event) => {
+		const unlistenShortcut = listen<string>('shortcut', (event) => {
 			const at = new Date().toLocaleTimeString();
-			if (event.payload === 'record') {
-				recording = !recording;
-				lastAction = `record ${recording ? 'started' : 'stopped'} at ${at}`;
-			} else {
-				lastAction = `${event.payload} at ${at}`;
-			}
+			lastAction = `${event.payload} at ${at}`;
+		});
+		const unlistenRecording = listen<boolean>('recording', (event) => {
+			recording = event.payload;
+		});
+		const unlistenNoModel = listen('no-model', () => {
+			tab = 'settings';
+		});
+		const unlistenError = listen<string>('pipeline-error', (event) => {
+			pipelineError = event.payload;
+		});
+		const unlistenProcessing = listen<boolean>('processing', (event) => {
+			processing = event.payload;
 		});
 		return () => {
-			unlisten.then((u) => u());
+			unlistenShortcut.then((u) => u());
+			unlistenRecording.then((u) => u());
+			unlistenNoModel.then((u) => u());
+			unlistenError.then((u) => u());
+			unlistenProcessing.then((u) => u());
 		};
 	});
 </script>
 
 <div class="root">
 	<nav>
-		<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
 		<button class:active={tab === 'history'} onclick={() => (tab = 'history')}>History</button>
+		<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
 	</nav>
 	<main>
 		{#if tab === 'settings'}
@@ -42,6 +55,10 @@
 	<footer>
 		{#if recording}
 			<span class="accent">● recording</span> — press the hotkey again to stop
+		{:else if processing}
+			<span class="accent">◌ transcribing…</span>
+		{:else if pipelineError}
+			<span class="error">{pipelineError}</span>
 		{:else if lastAction}
 			{lastAction}
 		{:else}
@@ -92,5 +109,9 @@
 
 	footer .accent {
 		color: var(--nord8);
+	}
+
+	footer .error {
+		color: var(--nord11);
 	}
 </style>

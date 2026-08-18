@@ -15,6 +15,8 @@ pub struct Settings {
 	pub use_gpu: bool,
 	/// Path override for the ggml model; None = managed download in models_dir.
 	pub model_path: Option<String>,
+	/// Chosen model id (see models::MODEL_CHOICES); None = most recent download.
+	pub model_id: Option<String>,
 	/// Overlay position as fractions of the screen (x, y).
 	pub overlay_x: f64,
 	pub overlay_y: f64,
@@ -27,6 +29,7 @@ impl Default for Settings {
 			gpu_device: 0,
 			use_gpu: true,
 			model_path: None,
+			model_id: None,
 			overlay_x: 0.5,
 			// DESIGN.md: initial indicator position = 20% from bottom.
 			overlay_y: 0.8,
