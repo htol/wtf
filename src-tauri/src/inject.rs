@@ -57,7 +57,7 @@ fn press_paste() -> Result<(), String> {
 pub fn paste(text: &str) -> Result<(), String> {
 	let saved = run(&["wl-paste", "--no-newline"]).ok();
 	set_clipboard(text)?;
-	press_paste()?;;
+	press_paste()?;
 	std::thread::sleep(RESTORE_DELAY);
 	if let Some(previous) = saved {
 		set_clipboard(&previous)?;
