@@ -20,13 +20,16 @@ mod tray;
 /// (tokio) runtime for the lifetime of the daemon.
 fn spawn_hotkeys(app: tauri::AppHandle) {
 	tauri::async_runtime::spawn(async move {
-		let globals = match hotkey::register().await {
-			Ok(globals) => globals,
+		use tauri::Manager;
+		let hotkeys = match hotkey::register().await {
+			Ok(hotkeys) => hotkeys,
 			Err(e) => {
 				eprintln!("hotkey: portal registration failed: {e}");
 				return;
 			}
 		};
+		let hub = std::sync::Arc::new(hotkeys);
+		app.manage(hub.clone());
 		let app_for_record = app.clone();
 		let emit = |id: &str| {
 			eprintln!("hotkey activated: {id}");
@@ -35,7 +38,7 @@ fn spawn_hotkeys(app: tauri::AppHandle) {
 			}
 			let _ = tauri::Emitter::emit(&app, "shortcut", id.to_string());
 		};
-		if let Err(e) = hotkey::listen(&globals, emit).await {
+		if let Err(e) = hotkey::listen(&hub.globals, emit).await {
 			eprintln!("hotkey: activation stream ended: {e}");
 		}
 	});
@@ -76,7 +79,8 @@ pub fn run() {
 			models::delete_model,
 			models::open_models_dir,
 			inject::copy_to_clipboard,
-			asr::list_gpu_devices
+			asr::list_gpu_devices,
+			hotkey::rebind_shortcuts
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");
