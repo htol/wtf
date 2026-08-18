@@ -32,12 +32,16 @@
 		const unlistenProcessing = listen<boolean>('processing', (event) => {
 			processing = event.payload;
 		});
+		const unlistenNoSpeech = listen('no-speech', () => {
+			lastAction = `no speech detected at ${new Date().toLocaleTimeString()}`;
+		});
 		return () => {
 			unlistenShortcut.then((u) => u());
 			unlistenRecording.then((u) => u());
 			unlistenNoModel.then((u) => u());
 			unlistenError.then((u) => u());
 			unlistenProcessing.then((u) => u());
+			unlistenNoSpeech.then((u) => u());
 		};
 	});
 	// Custom frame: the system title bar is disabled (decorations: false);

@@ -31,6 +31,9 @@ pub struct Settings {
 	/// Overlay position as fractions of the screen (x, y).
 	pub overlay_x: f64,
 	pub overlay_y: f64,
+	/// Peak amplitude below which a recording counts as silence and never
+	/// reaches whisper (hallucination guard); 0 disables the check.
+	pub silence_peak: f32,
 }
 
 impl Default for Settings {
@@ -50,6 +53,7 @@ impl Default for Settings {
 			overlay_x: 0.5,
 			// DESIGN.md: initial indicator position = 20% from bottom.
 			overlay_y: 0.8,
+			silence_peak: 0.1,
 		}
 	}
 }

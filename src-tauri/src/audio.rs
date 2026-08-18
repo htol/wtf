@@ -23,6 +23,11 @@ pub fn to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
 /// Whisper input rate (DESIGN.md, "Pipeline").
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
 
+/// Largest absolute sample amplitude, 0.0..=1.0.
+pub fn peak(samples: &[f32]) -> f32 {
+	samples.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()))
+}
+
 /// Resamples a mono signal between sample rates.
 ///
 /// Integer ratios (e.g. PipeWire's 48 kHz -> 16 kHz) decimate with a box
@@ -80,6 +85,12 @@ mod tests {
 	fn to_mono_passes_mono_through_unchanged() {
 		let mono = [0.25, -0.5, 0.75];
 		assert_eq!(to_mono(&mono, 1), mono.to_vec());
+	}
+
+	#[test]
+	fn peak_finds_the_largest_absolute_amplitude() {
+		assert_eq!(peak(&[0.1, -0.4, 0.2]), 0.4);
+		assert_eq!(peak(&[]), 0.0);
 	}
 
 	#[test]

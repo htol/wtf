@@ -9,6 +9,7 @@
 		use_gpu: boolean;
 		model_path: string | null;
 		model_id: string | null;
+		silence_peak: number;
 		overlay_x: number;
 		overlay_y: number;
 	}
@@ -45,6 +46,7 @@
 	let gpus = $state<GpuDevice[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	let savedAt = $state<string | null>(null);
+	let rebindResult = $state<string | null>(null);
 
 	let selectedModel = $derived(models.find((m) => m.id === settings?.model_id) ?? null);
 
@@ -74,6 +76,7 @@
 		current.use_gpu = settings.use_gpu;
 		current.model_path = settings.model_path;
 		current.model_id = settings.model_id;
+		current.silence_peak = settings.silence_peak;
 		await invoke('set_settings', { settings: current });
 	}
 
@@ -111,6 +114,16 @@
 
 	async function openModelsDir() {
 		await invoke('open_models_dir');
+	}
+
+	async function rebind() {
+		rebindResult = null;
+		try {
+			await invoke('rebind_shortcuts');
+			rebindResult = 'bound';
+		} catch (e) {
+			rebindResult = `${e}`;
+		}
 	}
 
 	async function save() {
@@ -168,6 +181,16 @@
 					<input type="number" min="0" bind:value={settings.gpu_device} disabled={!settings.use_gpu} />
 				</label>
 			{/if}
+			<label>
+				Silence threshold (0–1; recordings below it are skipped, 0 = off)
+				<input
+					type="number"
+					min="0"
+					max="1"
+					step="0.01"
+					bind:value={settings.silence_peak}
+				/>
+			</label>
 		</section>
 
 		<section>
@@ -223,7 +246,17 @@
 			</label>
 		</section>
 
-		<footer class="actions">
+		<section>
+		<h2>Shortcuts</h2>
+		<p class="hint">
+			Global shortcuts are bound via the desktop portal (KDE). Rebinding opens the
+			Plasma dialog for both shortcuts.
+		</p>
+		<button type="button" onclick={() => rebind()}>Rebind shortcuts</button>
+		{#if rebindResult}<span class="muted">{rebindResult}</span>{/if}
+	</section>
+
+	<footer class="actions">
 			<button type="submit" class="primary">Save</button>
 			{#if savedAt}<span class="muted">saved at {savedAt}</span>{/if}
 		</footer>

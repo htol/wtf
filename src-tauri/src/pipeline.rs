@@ -43,7 +43,16 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 				.stop()
 				.map_err(|e| format!("record stop failed: {e}"))
 				.and_then(|samples| {
-					let _ = app.emit("processing", true);
+				// Silence guard: whisper hallucinates fluent text on near-silence.
+				// Threshold comes from settings; 0 disables the check.
+				let threshold = settings::load().silence_peak;
+				let peak = audio::peak(&samples);
+				if threshold > 0.0 && peak < threshold {
+					eprintln!("no speech detected (peak {peak:.3} < {threshold:.3})");
+					let _ = app.emit("no-speech", ());
+					return Ok(());
+				}
+				let _ = app.emit("processing", true);
 					let result = transcribe_and_paste(&app, &samples);
 					let _ = app.emit("processing", false);
 					result
