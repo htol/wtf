@@ -168,6 +168,21 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 	Ok(())
 }
 
+/// Drops the cached transcriber: model weights and whisper state are freed
+/// (GPU VRAM + host memory); the next dictation reloads lazily.
+pub fn unload_transcriber(app: &tauri::AppHandle) {
+	let state = app.state::<Dictation>();
+	let mut cached = state.transcriber.lock().unwrap();
+	if cached.take().is_some() {
+		eprintln!("model unloaded");
+	}
+}
+
+#[tauri::command]
+pub fn unload_model(app: tauri::AppHandle) {
+	unload_transcriber(&app);
+}
+
 fn transcribe_cached(
 	app: &tauri::AppHandle,
 	model: &std::path::Path,
@@ -190,7 +205,7 @@ fn transcribe_cached(
 		));
 	}
 	cached
-		.as_ref()
+		.as_mut()
 		.expect("transcriber was just stored")
 		.1
 		.transcribe(samples, language, initial_prompt)

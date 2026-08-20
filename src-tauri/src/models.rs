@@ -162,7 +162,7 @@ pub async fn download_model(app: tauri::AppHandle, model_id: String) -> Result<(
 /// Removes a downloaded model file (and its stale partial download, if any)
 /// from the models dir. Managed files only: paths come from MODEL_CHOICES.
 #[tauri::command]
-pub fn delete_model(model_id: String) -> Result<(), String> {
+pub fn delete_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
 	let (_, file) = MODEL_CHOICES
 		.iter()
 		.find(|(id, _)| *id == model_id)
@@ -174,6 +174,9 @@ pub fn delete_model(model_id: String) -> Result<(), String> {
 		std::fs::remove_file(&path).map_err(|e| format!("cannot delete {}: {e}", path.display()))?;
 	}
 	let _ = std::fs::remove_file(dir.join(format!("{file}.part")));
+	// The deleted file may be the loaded model: drop the transcriber so its
+	// weights leave memory and the next dictation resolves a fresh model.
+	crate::pipeline::unload_transcriber(&app);
 	Ok(())
 }
 

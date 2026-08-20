@@ -92,7 +92,8 @@ pub fn run() {
 			models::open_models_dir,
 			inject::copy_to_clipboard,
 			asr::list_gpu_devices,
-			hotkey::rebind_shortcuts
+			hotkey::rebind_shortcuts,
+			pipeline::unload_model
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

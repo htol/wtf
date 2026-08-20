@@ -46,6 +46,7 @@
 	let gpus = $state<GpuDevice[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	let savedAt = $state<string | null>(null);
+	let unloadedAt = $state<string | null>(null);
 	let rebindResult = $state<string | null>(null);
 
 	let selectedModel = $derived(models.find((m) => m.id === settings?.model_id) ?? null);
@@ -114,6 +115,11 @@
 
 	async function openModelsDir() {
 		await invoke('open_models_dir');
+	}
+
+	async function unloadModel() {
+		await invoke('unload_model');
+		unloadedAt = new Date().toLocaleTimeString();
 	}
 
 	async function rebind() {
@@ -244,6 +250,14 @@
 					onchange={(e) => (settings!.model_path = e.currentTarget.value || null)}
 				/>
 			</label>
+			<div class="row">
+				<button type="button" onclick={() => unloadModel()}>Unload model from memory</button>
+				{#if unloadedAt}<span class="muted">unloaded at {unloadedAt}</span>{/if}
+			</div>
+			<p class="hint">
+				Frees the model weights from GPU/system memory; it reloads on the next
+				dictation. Switching models here unloads automatically.
+			</p>
 		</section>
 
 		<section>

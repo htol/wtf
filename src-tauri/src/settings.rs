@@ -82,8 +82,20 @@ pub fn get_settings() -> Settings {
 }
 
 #[tauri::command]
-pub fn set_settings(settings: Settings) -> Result<(), String> {
-	save(&settings)
+pub fn set_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), String> {
+	let previous = load();
+	save(&settings)?;
+	// The transcriber bakes these in at model load; apply them by dropping
+	// it — the next dictation reloads with the new values. Without this the
+	// old model would stay in VRAM until the next dictation swaps it.
+	if settings.model_path != previous.model_path
+		|| settings.model_id != previous.model_id
+		|| settings.gpu_device != previous.gpu_device
+		|| settings.use_gpu != previous.use_gpu
+	{
+		crate::pipeline::unload_transcriber(&app);
+	}
+	Ok(())
 }
 
 /// Persisted overlay position update from the overlay window's own drag
