@@ -24,6 +24,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Exit early when a second instance is launched (Plasma session restore
+# relaunches the app at login alongside the systemd user unit).
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }

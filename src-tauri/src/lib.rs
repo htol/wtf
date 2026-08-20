@@ -46,6 +46,18 @@ fn spawn_hotkeys(app: tauri::AppHandle) {
 
 pub fn run() {
 	tauri::Builder::default()
+		// Plasma session restore relaunches the app at login even though
+		// app-wtf.service already started it: restore's dedup only knows XDG
+		// autostart, not systemd user units (see README, Runtime dependencies).
+		// A second copy would race for the tray, GlobalShortcuts and the audio
+		// device, so it exits and surfaces the existing window instead.
+		.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+			use tauri::Manager;
+			if let Some(main) = app.get_webview_window("main") {
+				let _ = main.show();
+				let _ = main.set_focus();
+			}
+		}))
 		// Dictation daemon lives in the tray: closing the settings window
 		// hides it instead of exiting the app (Quit lives in the tray menu);
 		// the overlay is never closable, only shown/hidden by the pipeline.

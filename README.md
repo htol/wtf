@@ -25,6 +25,16 @@ make clean      # clean cargo + vite artifacts
   The systemd unit is named `app-wtf.service` and `wtf.desktop` is installed:
   the portal derives the app id for unsandboxed apps from the `app-*`
   user-unit name plus a matching desktop file.
+- Plasma session restore relaunches the app at login even though the
+  systemd unit already started it (restore's dedup only covers XDG
+  autostart and ksmserver clients). Exclude the app in
+  `~/.config/ksmserverrc` — and the binary refuses to run as a second
+  instance regardless (tauri-plugin-single-instance):
+
+  ```ini
+  [General]
+  excludeApps=wtf
+  ```
 
 ## Wayland notes
 
