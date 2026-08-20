@@ -170,7 +170,7 @@
 					<select value={settings.gpu_device} onchange={(e) => pickGpu(Number(e.currentTarget.value))}>
 						{#each gpus as gpu (gpu.index)}
 							<option value={gpu.index}>
-								{gpu.name} — {gpu.pci_bus_id}
+								{gpu.pci_bus_id ? `${gpu.name} — ${gpu.pci_bus_id}` : gpu.name}
 							</option>
 						{/each}
 					</select>

@@ -3,10 +3,13 @@
 //! Runtime GPU backend selection: whisper.cpp registers every backend the
 //! binary was built with (cuda, vulkan) and picks a device by index; the index
 //! comes from settings (`gpu_device`). Loading a model is expensive, so
-//! `Transcriber` will be created once and cached in app state.
+//! `Transcriber` (model + whisper state) is created once and cached in app
+//! state.
 
-/// A GPU visible to the ASR backend. `index` is the CUDA ordinal that
-/// whisper's `gpu_device` setting expects; `pci_bus_id` is the bus address.
+/// A GPU visible to the ASR backend. `index` is the backend's device ordinal
+/// that whisper's `gpu_device` setting expects (Vulkan physical-device order
+/// or the CUDA ordinal); `pci_bus_id` disambiguates identical cards when the
+/// backend can report it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GpuDevice {
 	pub index: i32,
@@ -14,10 +17,18 @@ pub struct GpuDevice {
 	pub pci_bus_id: String,
 }
 
-/// Enumerates NVIDIA GPUs (nvidia-smi ordinal == CUDA device index).
-/// Returns an empty list when nvidia-smi is unavailable.
+/// Enumerates the GPUs whisper itself will see, in `gpu_device` index order.
+/// The Vulkan build asks the Vulkan loader — the same
+/// vkEnumeratePhysicalDevices call whisper's backend makes — so indices
+/// line up on any vendor driver (RADV, NVIDIA, ...). CUDA-only builds fall
+/// back to nvidia-smi (its ordinal == the CUDA index).
 #[tauri::command]
 pub fn list_gpu_devices() -> Vec<GpuDevice> {
+	enumerate_devices()
+}
+
+#[cfg(all(feature = "asr-cuda", not(feature = "asr-vulkan")))]
+fn enumerate_devices() -> Vec<GpuDevice> {
 	let output = std::process::Command::new("nvidia-smi")
 		.args(["--query-gpu=index,name,pci.bus_id", "--format=csv,noheader"])
 		.output();
@@ -36,17 +47,81 @@ pub fn list_gpu_devices() -> Vec<GpuDevice> {
 			let pci_bus_id = parts.next().unwrap_or("").trim().to_string();
 			Some(GpuDevice {
 				index,
-			name,
-			pci_bus_id,
+				name,
+				pci_bus_id,
 			})
 		})
 		.collect()
 }
 
+#[cfg(feature = "asr-vulkan")]
+fn enumerate_devices() -> Vec<GpuDevice> {
+	use ash::vk;
+	// The loader is dlopen'd (ash "loaded"): no Vulkan install is needed
+	// at build time, and its absence at runtime just means an empty list.
+	let entry = match unsafe { ash::Entry::load() } {
+		Ok(entry) => entry,
+		Err(_) => return Vec::new(),
+	};
+	let app_info = vk::ApplicationInfo::default().application_name(c"wtf");
+	let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+	let Ok(instance) = (unsafe { entry.create_instance(&create_info, None) }) else {
+		return Vec::new();
+	};
+	// Keep `entry` alive until the instance is destroyed: dropping it first
+	// would dlclose libvulkan under live function pointers.
+	let devices = unsafe { instance.enumerate_physical_devices() }
+		.unwrap_or_default()
+		.iter()
+		.enumerate()
+		.map(|(index, &pd)| {
+			let props = unsafe { instance.get_physical_device_properties(pd) };
+			GpuDevice {
+				index: index as i32,
+				name: fixed_str(&props.device_name.map(|c| c as u8)),
+				pci_bus_id: String::new(),
+			}
+		})
+		.collect();
+	unsafe { instance.destroy_instance(None) };
+	devices
+}
+
+/// Vulkan strings are fixed NUL-terminated buffers; cut at the first NUL,
+/// guarding against a missing terminator.
+#[cfg(feature = "asr-vulkan")]
+fn fixed_str(bytes: &[u8]) -> String {
+	bytes
+		.split(|&b| b == 0)
+		.next()
+		.map(|s| String::from_utf8_lossy(s).into_owned())
+		.unwrap_or_default()
+}
+
+#[cfg(not(any(feature = "asr-vulkan", feature = "asr-cuda")))]
+fn enumerate_devices() -> Vec<GpuDevice> {
+	Vec::new()
+}
+
+#[cfg(all(test, feature = "asr-vulkan"))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn vulkan_devices_have_names() {
+		let devices = enumerate_devices();
+		assert!(!devices.is_empty(), "expected a Vulkan ICD on this host");
+		for device in &devices {
+			assert!(!device.name.is_empty(), "device {} has no name", device.index);
+		}
+	}
+}
+
 #[cfg(feature = "asr")]
 pub struct Transcriber {
-	#[allow(dead_code)] // placeholder until model loading is implemented
-	ctx: whisper_rs::WhisperContext,
+	/// Reused across transcriptions: `create_state()` allocates the KV cache
+	/// and compute buffers (~700 MB on large-v3, ~70 ms) on every call.
+	state: whisper_rs::WhisperState,
 }
 
 impl Transcriber {
@@ -54,9 +129,16 @@ impl Transcriber {
 		let mut params = whisper_rs::WhisperContextParameters::default();
 		params.use_gpu = use_gpu;
 		params.gpu_device = gpu_device;
+		// Flash attention: ~2x faster on the Vulkan backend (measured on
+		// large-v3 q5_0 / RX 9070 XT: 1.72 s -> 0.81 s per 5 s of audio);
+		// supported by the CUDA and Vulkan backends.
+		params.flash_attn = true;
 		let ctx = whisper_rs::WhisperContext::new_with_params(model_path, params)
 			.map_err(|e| format!("failed to load model: {e}"))?;
-		Ok(Self { ctx })
+		let state = ctx
+			.create_state()
+			.map_err(|e| format!("failed to create whisper state: {e}"))?;
+		Ok(Self { state })
 	}
 
 	/// `samples`: 16 kHz mono f32. `language`: language code, "auto", or None.
@@ -65,7 +147,7 @@ impl Transcriber {
 	/// Returns the transcript and the effective language code (forced or
 	/// detected).
 	pub fn transcribe(
-		&self,
+		&mut self,
 		samples: &[f32],
 		language: Option<&str>,
 		initial_prompt: Option<&str>,
@@ -80,7 +162,7 @@ impl Transcriber {
 		if let Some(prompt) = initial_prompt {
 			params.set_initial_prompt(prompt);
 		}
-		let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
+		let mut state = &mut self.state;
 		state
 			.full(params, samples)
 			.map_err(|e| format!("transcription failed: {e}"))?;
@@ -128,7 +210,7 @@ impl Transcriber {
 	}
 
 	pub fn transcribe(
-		&self,
+		&mut self,
 		_samples: &[f32],
 		_language: Option<&str>,
 		_initial_prompt: Option<&str>,

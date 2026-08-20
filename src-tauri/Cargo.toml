@@ -13,7 +13,7 @@ prod = ["tauri/custom-protocol"]
 # ASR backend (whisper.cpp). CPU-only unless a GPU backend feature is added.
 asr = ["dep:whisper-rs"]
 asr-cuda = ["asr", "whisper-rs/cuda"]
-asr-vulkan = ["asr", "whisper-rs/vulkan"]
+asr-vulkan = ["asr", "whisper-rs/vulkan", "dep:ash"]
 
 [lib]
 name = "wtf_lib"
@@ -39,6 +39,7 @@ tokio = { version = "1", features = ["fs"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 whisper-rs = { version = "0.16", optional = true }
+ash = { version = "0.38.0", features = ["loaded"], optional = true }
 
 [profile.release]
 strip = true
