@@ -57,6 +57,11 @@
 <div class="root">
 	<header class="titlebar" data-tauri-drag-region>
 		<span class="title" data-tauri-drag-region>wtf</span>
+		<nav data-tauri-drag-region>
+			<button class:active={tab === 'history'} onclick={() => (tab = 'history')}>History</button>
+			<button class:active={tab === 'prompts'} onclick={() => (tab = 'prompts')}>Prompts</button>
+			<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
+		</nav>
 		<div class="controls">
 			<button type="button" class="control" title="Minimize" onclick={minimizeWindow}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -66,11 +71,6 @@
 			</button>
 		</div>
 	</header>
-	<nav>
-		<button class:active={tab === 'history'} onclick={() => (tab = 'history')}>History</button>
-		<button class:active={tab === 'prompts'} onclick={() => (tab = 'prompts')}>Prompts</button>
-		<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
-	</nav>
 	<main>
 		{#if tab === 'history'}
 			<History />
@@ -150,17 +150,21 @@
 
 	nav {
 		display: flex;
-		gap: 4px;
-		padding: 8px 12px 0;
-		background: var(--nord1);
+		gap: 2px;
+		margin-left: 14px;
 	}
 
 	nav button {
 		border: none;
-		border-radius: 4px 4px 0 0;
+		border-radius: 4px;
 		background: transparent;
 		color: var(--nord4);
-		padding: 8px 18px;
+		font-size: 12px;
+		padding: 4px 12px;
+	}
+
+	nav button:hover {
+		background: var(--nord2);
 	}
 
 	nav button.active {
