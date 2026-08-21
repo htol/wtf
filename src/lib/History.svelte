@@ -196,6 +196,10 @@
 		white-space: pre-wrap;
 		border-left: 2px solid var(--nord1);
 		padding-left: 10px;
+		/* Global app-like `user-select: none` (nord.css); transcript text
+		 * stays selectable for partial copying. */
+		user-select: text;
+		-webkit-user-select: text;
 	}
 
 	.hint {
