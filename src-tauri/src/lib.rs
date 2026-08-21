@@ -60,13 +60,18 @@ pub fn run() {
 		}))
 		// Dictation daemon lives in the tray: closing the settings window
 		// hides it instead of exiting the app (Quit lives in the tray menu);
-		// the overlay is never closable, only shown/hidden by the pipeline.
+		// the overlay is only shown/hidden by the pipeline — but it must obey
+		// close requests. It stays mapped from startup (prime_overlay), so a
+		// refused close would block session logout (KDE shows a "forcibly
+		// log out?" dialog). Nothing closes it mid-session; the only realistic
+		// source of a close request is the session manager at logout.
 		.on_window_event(|window, event| {
 			if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-				api.prevent_close();
-				if window.label() != "overlay" {
-					let _ = window.hide();
+				if window.label() == "overlay" {
+					return;
 				}
+				api.prevent_close();
+				let _ = window.hide();
 			}
 		})
 		.setup(|app| {
