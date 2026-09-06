@@ -35,6 +35,9 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # HTTP is only used for model downloads from huggingface.co; tokio::fs for
 # streaming the response body to disk on the tauri runtime.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+# Update check: installed model files are hashed (sha256) and compared with
+# the huggingface tree API.
+sha2 = "0.10"
 tokio = { version = "1", features = ["fs"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"

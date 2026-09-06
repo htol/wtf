@@ -75,6 +75,9 @@ except model catalog cards and one banner:
 - GigaAM models: separate catalog, `~/.local/share/wtf/models/gigaam/`
   (see "Engines").
 - Manual path override in settings (whisper only).
+- Update check (Settings button): sha256 of each installed model vs the HF
+  tree API (`lfs.oid`) — whisper against `main`, GigaAM against the pinned
+  revision; a mismatch means "re-download".
 
 ## App identity
 

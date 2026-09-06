@@ -99,6 +99,7 @@ pub fn run() {
 			models::list_gigaam_models,
 			models::download_gigaam_model,
 			models::delete_gigaam_model,
+			models::check_model_updates,
 			inject::copy_to_clipboard,
 			asr::list_gpu_devices,
 			hotkey::rebind_shortcuts,

@@ -47,6 +47,12 @@
 		done: boolean;
 	}
 
+	interface UpdateStatus {
+		id: string;
+		file: string;
+		up_to_date: boolean;
+	}
+
 	// Two Russian rows double as the engine switch: `ru` prefers GigaAM,
 	// `ru-whisper` pins Russian to whisper (see pipeline.rs routing).
 	const LANGUAGES: Array<{ value: string; label: string }> = [
@@ -66,6 +72,10 @@
 	let snapshot = $state('');
 	let unloadedAt = $state<string | null>(null);
 	let rebindResult = $state<string | null>(null);
+	// Verdicts of the last "Check for updates" run: catalog id -> result.
+	// Cleared per model after a successful re-download.
+	let updates = $state<Record<string, boolean | undefined>>({});
+	let checking = $state(false);
 
 	let selectedModel = $derived(models.find((m) => m.id === settings?.model_id) ?? null);
 
@@ -144,6 +154,7 @@
 		progress[id] = { id, downloaded: 0, total: null, done: false };
 		try {
 			await invoke('download_model', { modelId: id });
+			delete updates[id];
 		} catch (e) {
 			alert(`Download failed: ${e}`);
 		}
@@ -165,6 +176,7 @@
 		progress[id] = { id, downloaded: 0, total: null, done: false };
 		try {
 			await invoke('download_gigaam_model', { modelId: id });
+			delete updates[id];
 		} catch (e) {
 			alert(`Download failed: ${e}`);
 		}
@@ -193,6 +205,21 @@
 
 	async function openModelsDir() {
 		await invoke('open_models_dir');
+	}
+
+	// One run covers both engines (both catalogs are fetched and hashed
+	// together). The single button lives in the Model section; GigaAM
+	// verdicts surface as badges on its cards.
+	async function checkUpdates() {
+		if (checking) return;
+		checking = true;
+		try {
+			const statuses = await invoke<UpdateStatus[]>('check_model_updates');
+			updates = Object.fromEntries(statuses.map((s) => [s.id, s.up_to_date]));
+		} catch (e) {
+			alert(`Update check failed: ${e}`);
+		}
+		checking = false;
 	}
 
 	async function unloadModel() {
@@ -324,6 +351,19 @@
 					{/if}
 				{/if}
 			</div>
+			<div class="report">
+				<button type="button" disabled={checking} onclick={() => checkUpdates()}>
+					{checking ? 'Checking…' : 'Check for updates'}
+				</button>
+				{#each models.filter((m) => m.installed && updates[m.id] !== undefined) as m (m.id)}
+					<span class={updates[m.id] ? 'ok' : 'stale'}>
+						{m.id}: {updates[m.id] ? 'up to date' : 'update available'}
+					</span>
+				{/each}
+			</div>
+			<p class="hint">
+				Hashes installed models and compares them with huggingface.co (both engines).
+			</p>
 			<label>
 				Manual model path (overrides the picker)
 				<input
@@ -349,8 +389,8 @@
 				Used when the language is RU (GigaAM); CPU-only. Auto, EN and RU
 				(Whisper) stay on Whisper. Without a downloaded model, RU (GigaAM)
 				also falls back to Whisper.
-			</p>
-			<div class="cards">
+		</p>
+		<div class="cards">
 				<div
 					class="card"
 					class:active={settings.gigaam_model_id === null && gigaamModels.some((m) => m.installed)}
@@ -374,6 +414,11 @@
 					>
 						<div class="head">
 							<span class="name">{model.id}</span>
+							{#if updates[model.id] !== undefined}
+								<span class="badge {updates[model.id] ? 'ok' : 'stale'}">
+									{updates[model.id] ? 'up to date' : 'update available'}
+								</span>
+							{/if}
 							{#if model.active}<span class="badge">active</span>{/if}
 						</div>
 						<span class="desc">{model.note}</span>
@@ -534,6 +579,32 @@
 
 	.muted {
 		color: var(--nord3);
+	}
+
+	.report {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		max-width: 560px;
+	}
+
+	.report .ok {
+		color: var(--nord14);
+	}
+
+	.report .stale {
+		color: var(--nord13);
+	}
+
+	.card .badge.ok {
+		color: var(--nord14);
+		margin-left: 0;
+	}
+
+	.card .badge.stale {
+		color: var(--nord13);
+		margin-left: 0;
 	}
 
 	.hint {

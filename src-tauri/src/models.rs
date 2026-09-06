@@ -368,3 +368,119 @@ pub fn open_models_dir() -> Result<(), String> {
 		.map_err(|e| format!("xdg-open: {e}"))?;
 	Ok(())
 }
+
+// --- Update check (installed models vs upstream; DESIGN.md "Models") ---
+
+/// Tree API of the whisper catalog: tracks `main`, so files there can be
+/// replaced upstream after a download. LFS entries carry `lfs.oid`, the
+/// sha256 of the file content.
+const HF_TREE: &str = "https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main";
+
+/// Tree API of the GigaAM catalog, at the same pinned revision as
+/// `GIGAAM_HF_BASE` above (keep the two in sync). The revision is immutable,
+/// so a mismatch means the local file predates the current pin or is
+/// corrupt.
+const GIGAAM_HF_TREE: &str =
+	"https://huggingface.co/api/models/istupakov/gigaam-v3-onnx/tree/322c3b29492673eb7d0b434bfa9dfb8653e34d02";
+
+/// HF tree-API entry, reduced to the fields the update check needs.
+#[derive(serde::Deserialize)]
+struct TreeEntry {
+	path: String,
+	lfs: Option<TreeLfs>,
+}
+
+/// LFS details of a tree entry; `oid` is the sha256 of the content.
+#[derive(serde::Deserialize)]
+struct TreeLfs {
+	oid: String,
+}
+
+/// Fetches a tree-API listing and maps file name -> upstream sha256.
+/// Non-LFS entries carry no content hash and are skipped.
+async fn fetch_upstream_hashes(
+	url: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+	let bytes = reqwest::get(url)
+		.await
+		.map_err(|e| format!("update check request failed: {e}"))?
+		.error_for_status()
+		.map_err(|e| format!("huggingface returned an error: {e}"))?
+		.bytes()
+		.await
+		.map_err(|e| format!("update check interrupted: {e}"))?;
+	let entries: Vec<TreeEntry> = serde_json::from_slice(&bytes)
+		.map_err(|e| format!("cannot parse huggingface response: {e}"))?;
+	Ok(entries
+		.into_iter()
+		.filter_map(|e| e.lfs.map(|lfs| (e.path, lfs.oid)))
+		.collect())
+}
+
+/// Streaming sha256 of a local file, hex-encoded.
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+	use sha2::{Digest, Sha256};
+	use std::io::Read;
+	let mut file =
+		std::fs::File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+	let mut hasher = Sha256::new();
+	let mut buf = vec![0u8; 1024 * 1024];
+	loop {
+		let n = file
+			.read(&mut buf)
+			.map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+		if n == 0 {
+			break;
+		}
+		hasher.update(&buf[..n]);
+	}
+	Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Update-check verdict for one installed model.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpdateStatus {
+	pub id: &'static str,
+	pub file: &'static str,
+	/// The local file is byte-identical to the upstream copy.
+	pub up_to_date: bool,
+}
+
+/// Compares every installed catalog model with huggingface: the tree API
+/// supplies the upstream sha256 (`lfs.oid`), the local file is hashed with
+/// sha256. Whisper is checked against `main`, GigaAM against its pinned
+/// revision. Hashing multi-GB files takes seconds, so it runs on a blocking
+/// thread.
+#[tauri::command]
+pub async fn check_model_updates() -> Result<Vec<UpdateStatus>, String> {
+	let whisper = fetch_upstream_hashes(HF_TREE).await?;
+	let gigaam = fetch_upstream_hashes(GIGAAM_HF_TREE).await?;
+	// (id, file, path, upstream sha256; None = no upstream entry)
+	let mut jobs: Vec<(&'static str, &'static str, PathBuf, Option<String>)> = Vec::new();
+	for &(id, file) in MODEL_CHOICES {
+		let path = app_id::models_dir().join(file);
+		if path.is_file() {
+			jobs.push((id, file, path, whisper.get(file).cloned()));
+		}
+	}
+	for choice in GIGAAM_CHOICES {
+		let path = gigaam_dir().join(choice.file);
+		if path.is_file() {
+			jobs.push((choice.id, choice.file, path, gigaam.get(choice.file).cloned()));
+		}
+	}
+	tauri::async_runtime::spawn_blocking(move || {
+		jobs.into_iter()
+			.map(|(id, file, path, upstream)| {
+				let local = sha256_file(&path)?;
+				Ok(UpdateStatus {
+					id,
+					file,
+					up_to_date: upstream.as_deref() == Some(local.as_str()),
+				})
+			})
+			.collect()
+	})
+	.await
+	.map_err(|e| format!("update check failed: {e}"))?
+}
