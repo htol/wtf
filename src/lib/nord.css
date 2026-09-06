@@ -42,6 +42,28 @@ body {
 	height: 100%;
 }
 
+/* WebKitGTK paints overlay scrollbars that fade out completely once the
+ * pointer leaves the window — with no hint that more settings are below
+ * the fold. Custom scrollbars are always painted instead, so style them
+ * slim and Nord to keep them visible. */
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--nord3);
+	border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--nord4);
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
 * {
 	box-sizing: border-box;
 }
