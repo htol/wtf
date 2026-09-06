@@ -49,9 +49,11 @@ except model catalog cards and one banner:
   language switch); `unload_model` drops everything.
 - Prompts: GigaAM ignores `initial_prompt`; the Prompts tab carries a
   static banner saying prompts apply to whisper only.
-- CPU only for GigaAM. GPU is a follow-up (ort has `rocm`/`webgpu`
-  features); `ort` is pinned `=2.0.0-rc.13` and fetches prebuilt
-  libonnxruntime at build time (`download-binaries`).
+- CPU only for GigaAM — final: GPU rejected (CPU latency already sits
+  below the dictation perceptibility threshold; a GPU session would only
+  add resident VRAM and an `ort` `rocm`/`webgpu` build). `ort` is pinned
+  `=2.0.0-rc.13` and fetches prebuilt libonnxruntime at build time
+  (`download-binaries`).
 
 ## UX
 
