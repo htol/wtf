@@ -66,8 +66,8 @@
 
 <div class="wrap">
 	<p class="banner">
-		Prompts apply to Whisper only (auto mode / other languages). Russian
-		dictation uses the GigaAM engine, which does not support prompts.
+		Prompts apply to Whisper only (every language row except RU (GigaAM));
+		the GigaAM engine does not support prompts.
 	</p>
 	<div class="prompts">
 		<div class="list">

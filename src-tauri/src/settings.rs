@@ -15,7 +15,9 @@ pub struct NamedPrompt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-	/// Whisper language code, or "auto" for detection.
+	/// Whisper language code, "auto" for detection, or "ru-whisper" for
+	/// Russian pinned to whisper (plain "ru" routes to GigaAM; see
+	/// pipeline.rs).
 	pub language: String,
 	/// GPU device index passed to whisper (`gpu_device`); 0 = first GPU.
 	pub gpu_device: i32,

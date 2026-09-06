@@ -46,10 +46,13 @@
 		done: boolean;
 	}
 
+	// Two Russian rows double as the engine switch: `ru` prefers GigaAM,
+	// `ru-whisper` pins Russian to whisper (see pipeline.rs routing).
 	const LANGUAGES: Array<{ value: string; label: string }> = [
-		{ value: 'auto', label: 'Auto-detect' },
-		{ value: 'en', label: 'English' },
-		{ value: 'ru', label: 'Russian' }
+		{ value: 'auto', label: 'Auto' },
+		{ value: 'en', label: 'EN' },
+		{ value: 'ru', label: 'RU (GigaAM)' },
+		{ value: 'ru-whisper', label: 'RU (Whisper)' }
 	];
 
 	let settings = $state<Settings | null>(null);
@@ -313,9 +316,9 @@
 		<section>
 			<h2>Russian engine — GigaAM</h2>
 			<p class="hint">
-				Used automatically when the language is Russian; CPU-only. Auto-detect
-				and other languages stay on Whisper. Without a downloaded model,
-				Russian also falls back to Whisper.
+				Used when the language is RU (GigaAM); CPU-only. Auto, EN and RU
+				(Whisper) stay on Whisper. Without a downloaded model, RU (GigaAM)
+				also falls back to Whisper.
 			</p>
 			<div class="cards">
 				<div

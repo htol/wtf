@@ -2,9 +2,9 @@
 //! paste into the focused app -> history (DESIGN.md "Pipeline").
 //!
 //! Engine routing (DESIGN.md, "Engines"): language `ru` -> GigaAM when its
-//! model is downloaded; `auto` and every other language -> whisper. `ru`
-//! without the GigaAM model falls back to whisper with a one-time
-//! download suggestion.
+//! model is downloaded; `auto`, `en` and `ru-whisper` (Russian pinned to
+//! whisper) -> whisper. `ru` without the GigaAM model falls back to whisper
+//! with a one-time download suggestion.
 //!
 //! `Dictation` is app-managed state. Engines are created lazily on the first
 //! transcription and cached, each slot keyed by model path (loading is
@@ -154,8 +154,13 @@ fn spawn_level_ticker(app: tauri::AppHandle) {
 
 fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), String> {
 	let settings = settings::load();
+	// Two Russian rows in the selector: `ru` prefers GigaAM, `ru-whisper`
+	// pins Russian to whisper; both force the language code so the whisper
+	// fallback/fixed path transcribes Russian.
+	let use_gigaam = settings.language == "ru";
 	let language = match settings.language.as_str() {
 		"auto" => None,
+		"ru-whisper" => Some("ru"),
 		code => Some(code),
 	};
 	let prompt = settings
@@ -163,7 +168,7 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 		.as_ref()
 		.and_then(|name| settings.prompts.iter().find(|p| &p.name == name))
 		.map(|p| p.text.as_str());
-	let (text, lang) = if language == Some("ru") {
+	let (text, lang) = if use_gigaam {
 		match models::resolve_gigaam(settings.gigaam_model_id.as_deref()) {
 			Some(model) => (
 				transcribe_gigaam_cached(app, &model, samples)?,

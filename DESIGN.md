@@ -29,10 +29,11 @@ Wayland. Stack: Rust, Tauri 2, whisper.cpp (whisper-rs), Svelte 5 + Vite, Nord.
 Two ASR engines behind one seam (`asr::Transcriber`), invisible to the user
 except model catalog cards and one banner:
 
-- Routing: language `ru` -> GigaAM when its model is downloaded; `auto` and
-  all other languages -> whisper. `ru` without the model -> whisper + a
+- Routing: language `ru` -> GigaAM when its model is downloaded; `auto`,
+  `en` and `ru-whisper` -> whisper. `ru` without the model -> whisper + a
   one-time-per-session desktop notification suggesting the download. The
-  language selector doubles as the engine switch — no extra knob.
+  language selector doubles as the engine switch — two Russian rows
+  (`RU (GigaAM)` / `RU (Whisper)`) instead of an extra knob.
 - GigaAM model: `gigaam-v3-e2e-ctc` from HF `istupakov/gigaam-v3-onnx`,
   revision pinned in code (`models::GIGAAM_HF_BASE`). Catalog: fp32
   (recommended — measured faster than int8 on CPU) and int8 (compact).
