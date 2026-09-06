@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { onMount } from 'svelte';
+	import { releaseSaveBar, saveBar } from './saveState';
 
 	interface NamedPrompt {
 		name: string;
@@ -16,24 +17,42 @@
 	let prompts = $state<NamedPrompt[]>([]);
 	let active = $state<string | null>(null);
 	let selectedName = $state<string | null>(null);
-	let savedAt = $state<string | null>(null);
+	// Snapshot of the persisted slice (prompts + active) for dirty
+	// tracking; divergence enables the tab-bar Save button. `loaded` keeps
+	// the button inert until the initial get_settings resolves.
+	let snapshot = $state('');
+	let loaded = $state(false);
 
 	let selected = $derived(prompts.find((p) => p.name === selectedName) ?? null);
+
+	function ownedValues(): string {
+		return JSON.stringify([prompts, active]);
+	}
+
+	const dirty = $derived(loaded && ownedValues() !== snapshot);
+
+	$effect(() => {
+		saveBar.update((s) => ({ ...s, dirty }));
+	});
 
 	async function load() {
 		const settings = await invoke<Settings>('get_settings');
 		prompts = settings.prompts;
 		active = settings.active_prompt;
 		selectedName = settings.prompts[0]?.name ?? null;
+		snapshot = ownedValues();
+		loaded = true;
 	}
 
-	async function persist() {
+	async function save() {
+		if (!dirty) return;
 		// The Prompts tab owns its slice of settings; the rest is untouched.
 		const settings = await invoke<Settings>('get_settings');
 		settings.prompts = prompts;
 		settings.active_prompt = active;
 		await invoke('set_settings', { settings });
-		savedAt = new Date().toLocaleTimeString();
+		snapshot = ownedValues();
+		saveBar.update((s) => ({ ...s, savedAt: new Date().toLocaleTimeString() }));
 	}
 
 	function select(name: string) {
@@ -60,7 +79,10 @@
 	// starts empty and saved prompts look lost (the actual bug behind
 	// "prompts disappear after restart").
 	onMount(() => {
+		const owner = () => void save();
+		saveBar.update((s) => ({ ...s, save: owner }));
 		load();
+		return () => releaseSaveBar(owner);
 	});
 </script>
 
@@ -113,10 +135,6 @@
 					bind:value={selected.text}
 					placeholder="Example sentences in the style you want transcribed, e.g. mixed Russian/English speech. This conditions the decoder's style and vocabulary — it is not an instruction the model follows."
 				></textarea>
-				<div class="row save-row">
-					<button type="button" class="primary" onclick={() => persist()}>Save</button>
-					{#if savedAt}<span class="muted">saved at {savedAt}</span>{/if}
-				</div>
 			</div>
 		{:else}
 			<p class="hint">No prompt selected. Create one, write a few example sentences, activate it.</p>
@@ -213,10 +231,6 @@
 		flex: 1;
 	}
 
-	.save-row {
-		justify-content: flex-start;
-	}
-
 	input[type='text'],
 	textarea {
 		font: inherit;
@@ -241,10 +255,6 @@
 	.danger:hover {
 		background: var(--nord11);
 		color: var(--nord6);
-	}
-
-	.muted {
-		color: var(--nord3);
 	}
 
 	.hint {

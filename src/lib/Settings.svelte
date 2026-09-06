@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount } from 'svelte';
+	import { releaseSaveBar, saveBar } from './saveState';
 
 	interface Settings {
 		language: string;
@@ -60,11 +61,32 @@
 	let gigaamModels = $state<GigaamModelInfo[]>([]);
 	let gpus = $state<GpuDevice[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
-	let savedAt = $state<string | null>(null);
+	// Snapshot of the persisted values this tab owns; divergence from the
+	// live form state is what enables the tab-bar Save button.
+	let snapshot = $state('');
 	let unloadedAt = $state<string | null>(null);
 	let rebindResult = $state<string | null>(null);
 
 	let selectedModel = $derived(models.find((m) => m.id === settings?.model_id) ?? null);
+
+	function ownedValues(): string {
+		if (!settings) return '';
+		return JSON.stringify([
+			settings.language,
+			settings.gpu_device,
+			settings.use_gpu,
+			settings.model_path,
+			settings.model_id,
+			settings.gigaam_model_id,
+			settings.silence_peak
+		]);
+	}
+
+	const dirty = $derived(settings !== null && ownedValues() !== snapshot);
+
+	$effect(() => {
+		saveBar.update((s) => ({ ...s, dirty }));
+	});
 
 	function formatSize(bytes: number | null): string {
 		if (bytes === null) return '';
@@ -98,6 +120,9 @@
 		current.gigaam_model_id = settings.gigaam_model_id;
 		current.silence_peak = settings.silence_peak;
 		await invoke('set_settings', { settings: current });
+		// Everything just written matches disk again (model/GPU pickers
+		// persist through this same path).
+		snapshot = ownedValues();
 	}
 
 	async function pickModel(id: string | null) {
@@ -186,15 +211,19 @@
 	}
 
 	async function save() {
-		if (!settings) return;
+		if (!settings || !dirty) return;
 		await persistOwn();
-		savedAt = new Date().toLocaleTimeString();
+		const savedAt = new Date().toLocaleTimeString();
+		saveBar.update((s) => ({ ...s, savedAt }));
 		await refreshModels();
 	}
 
 	onMount(() => {
+		const owner = () => void save();
+		saveBar.update((s) => ({ ...s, save: owner }));
 		invoke<Settings>('get_settings').then((s) => {
 			settings = s;
+			snapshot = ownedValues();
 			refreshModels();
 		});
 		invoke<GpuDevice[]>('list_gpu_devices').then((devices) => (gpus = devices));
@@ -202,6 +231,7 @@
 			progress[event.payload.id] = event.payload;
 		});
 		return () => {
+			releaseSaveBar(owner);
 			unlisten.then((u) => u());
 		};
 	});
@@ -405,12 +435,7 @@
 		<button type="button" onclick={() => rebind()}>Rebind shortcuts</button>
 		{#if rebindResult}<span class="muted">{rebindResult}</span>{/if}
 	</section>
-
-	<footer class="actions">
-			<button type="submit" class="primary">Save</button>
-			{#if savedAt}<span class="muted">saved at {savedAt}</span>{/if}
-		</footer>
-	</form>
+</form>
 {:else}
 	<p class="hint">Loading settings…</p>
 {/if}

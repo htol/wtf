@@ -5,6 +5,7 @@
 	import Settings from './lib/Settings.svelte';
 	import History from './lib/History.svelte';
 	import Prompts from './lib/Prompts.svelte';
+	import { saveBar } from './lib/saveState';
 
 	type Tab = 'history' | 'prompts' | 'settings';
 	let tab: Tab = $state('history');
@@ -67,6 +68,17 @@
 			<button class:active={tab === 'settings'} onclick={() => (tab = 'settings')}>Settings</button>
 		</nav>
 		<div class="controls">
+			{#if tab === 'settings' || tab === 'prompts'}
+				{#if $saveBar.savedAt}<span class="saved-at">saved at {$saveBar.savedAt}</span>{/if}
+				<button
+					type="button"
+					class="save"
+					disabled={!$saveBar.dirty || !$saveBar.save}
+					onclick={() => $saveBar.save?.()}
+				>
+					Save
+				</button>
+			{/if}
 			<button type="button" class="control" title="Minimize" onclick={minimizeWindow}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
 			</button>
@@ -127,6 +139,7 @@
 	.controls {
 		margin-left: auto;
 		display: flex;
+		align-items: center;
 		gap: 2px;
 	}
 
@@ -174,6 +187,36 @@
 	nav button.active {
 		background: var(--nord0);
 		color: var(--nord8);
+	}
+
+	/* Tab-bar Save for the settings tab: subdued and inert until the form
+	 * diverges from what is on disk (dirty flag from saveState). Sits in
+	 * the right-hand controls cluster, next to the window buttons. */
+	.save {
+		margin-right: 8px;
+		padding: 3px 14px;
+		font-size: 12px;
+		background: var(--nord10);
+		border-color: var(--nord10);
+		color: var(--nord6);
+	}
+
+	.save:hover:not(:disabled) {
+		background: var(--nord9);
+	}
+
+	.save:disabled {
+		background: transparent;
+		border-color: var(--nord1);
+		color: var(--nord3);
+		cursor: default;
+	}
+
+	.saved-at {
+		margin-right: 6px;
+		font-size: 11px;
+		color: var(--nord3);
+		user-select: none;
 	}
 
 	main {
