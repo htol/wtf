@@ -1,0 +1,8 @@
+[project]
+name = "gigaam-spike"
+version = "0.0.0"
+description = "PROTOTYPE (throwaway): GigaAM v3 ONNX local feasibility check"
+requires-python = ">=3.10"
+dependencies = [
+    "onnx-asr[cpu,hub]",
+]

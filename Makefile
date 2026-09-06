@@ -11,7 +11,7 @@ DESKTOP_DIR := $(HOME)/.local/share/applications
 ICON_DIR := $(HOME)/.local/share/icons/hicolor/128x128/apps
 RELEASE_BIN := src-tauri/target/release/$(BIN_NAME)
 
-.PHONY: dev build smoke install enable check clean npm-install
+.PHONY: dev build smoke install enable check clean npm-install spike-gigaam
 
 npm-install:
 	npm install
@@ -51,3 +51,12 @@ enable:
 clean:
 	cargo clean --manifest-path src-tauri/Cargo.toml
 	rm -rf dist node_modules/.vite
+
+# PROTOTYPE (throwaway): GigaAM v3 ONNX local feasibility check,
+# see spike/gigaam/README.md. MODEL=gigaam-v3-e2e-rnnt to switch engine.
+MODEL ?= gigaam-v3-e2e-ctc
+spike-gigaam:
+	test -f spike/gigaam/example.wav \
+		|| curl -fsSL -o spike/gigaam/example.wav \
+			https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/example.wav
+	uv run --project spike/gigaam python spike/gigaam/run.py --model $(MODEL) spike/gigaam/example.wav
