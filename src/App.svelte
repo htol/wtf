@@ -35,6 +35,9 @@
 		const unlistenNoSpeech = listen('no-speech', () => {
 			lastAction = `no speech detected at ${new Date().toLocaleTimeString()}`;
 		});
+		const unlistenGigaamSuggest = listen('gigaam-suggest', () => {
+			lastAction = 'tip: download the GigaAM model in Settings for Russian dictation';
+		});
 		return () => {
 			unlistenShortcut.then((u) => u());
 			unlistenRecording.then((u) => u());
@@ -42,6 +45,7 @@
 			unlistenError.then((u) => u());
 			unlistenProcessing.then((u) => u());
 			unlistenNoSpeech.then((u) => u());
+			unlistenGigaamSuggest.then((u) => u());
 		};
 	});
 	// Custom frame: the system title bar is disabled (decorations: false);

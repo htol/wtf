@@ -1,11 +1,17 @@
 //! Dictation pipeline: `record` hotkey toggle -> capture -> transcribe ->
 //! paste into the focused app -> history (DESIGN.md "Pipeline").
 //!
-//! `Dictation` is app-managed state. The transcriber is created lazily on
-//! the first transcription and cached, keyed by model path (loading a model
-//! is expensive).
+//! Engine routing (DESIGN.md, "Engines"): language `ru` -> GigaAM when its
+//! model is downloaded; `auto` and every other language -> whisper. `ru`
+//! without the GigaAM model falls back to whisper with a one-time
+//! download suggestion.
+//!
+//! `Dictation` is app-managed state. Engines are created lazily on the first
+//! transcription and cached, each slot keyed by model path (loading is
+//! expensive); both stay loaded across language switches.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{Emitter, Manager};
@@ -14,14 +20,21 @@ use crate::{asr, audio, history, inject, models, settings};
 
 pub struct Dictation {
 	recorder: Mutex<Option<audio::Recorder>>,
-	transcriber: Mutex<Option<(PathBuf, asr::Transcriber)>>,
+	/// Whisper slot: Transcriber::Whisper, keyed by ggml model path.
+	whisper: Mutex<Option<(PathBuf, asr::Transcriber)>>,
+	/// GigaAM slot: Transcriber::GigaAm, keyed by onnx model path.
+	gigaam: Mutex<Option<(PathBuf, asr::Transcriber)>>,
+	/// Guard for the one-time-per-session GigaAM download suggestion.
+	gigaam_suggested: AtomicBool,
 }
 
 impl Dictation {
 	pub fn new() -> Self {
 		Self {
 			recorder: Mutex::new(None),
-			transcriber: Mutex::new(None),
+			whisper: Mutex::new(None),
+			gigaam: Mutex::new(None),
+			gigaam_suggested: AtomicBool::new(false),
 		}
 	}
 }
@@ -141,16 +154,6 @@ fn spawn_level_ticker(app: tauri::AppHandle) {
 
 fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), String> {
 	let settings = settings::load();
-	let Some(model) = models::resolve(settings.model_path.as_deref(), settings.model_id.as_deref()) else {
-		// First run: no model yet. Open the settings window on the model
-		// picker instead of failing silently.
-		if let Some(window) = app.get_webview_window("main") {
-			let _ = window.show();
-			let _ = window.set_focus();
-		}
-		let _ = app.emit("no-model", ());
-		return Err("no model available: download one in settings".into());
-	};
 	let language = match settings.language.as_str() {
 		"auto" => None,
 		code => Some(code),
@@ -160,7 +163,24 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 		.as_ref()
 		.and_then(|name| settings.prompts.iter().find(|p| &p.name == name))
 		.map(|p| p.text.as_str());
-	let (text, lang) = transcribe_cached(app, &model, samples, language, prompt)?;
+	let (text, lang) = if language == Some("ru") {
+		match models::resolve_gigaam(settings.gigaam_model_id.as_deref()) {
+			Some(model) => (
+				transcribe_gigaam_cached(app, &model, samples)?,
+				"ru".to_string(),
+			),
+			None => {
+				// No GigaAM model: whisper handles Russian, and the user gets
+				// one nudge per session towards the better engine.
+				suggest_gigaam_download(app);
+				let model = require_whisper_model(app)?;
+				transcribe_whisper_cached(app, &model, samples, Some("ru"), prompt)?
+			}
+		}
+	} else {
+		let model = require_whisper_model(app)?;
+		transcribe_whisper_cached(app, &model, samples, language, prompt)?
+	};
 	inject::paste(&text)?;
 	let conn = history::open()?;
 	history::insert(&conn, &text, &lang)?;
@@ -168,13 +188,57 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 	Ok(())
 }
 
-/// Drops the cached transcriber: model weights and whisper state are freed
+/// Resolves the whisper model or opens the settings window on the model
+/// picker instead of failing silently (first run).
+fn require_whisper_model(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+	let settings = settings::load();
+	models::resolve(settings.model_path.as_deref(), settings.model_id.as_deref()).ok_or_else(|| {
+		if let Some(window) = app.get_webview_window("main") {
+			let _ = window.show();
+			let _ = window.set_focus();
+		}
+		let _ = app.emit("no-model", ());
+		"no model available: download one in settings".to_string()
+	})
+}
+
+/// One-time-per-session desktop notification: Russian dictation could use
+/// the GigaAM engine (DESIGN.md "Engines"). Fire-and-forget: portal
+/// notification failures only cost the suggestion.
+fn suggest_gigaam_download(app: &tauri::AppHandle) {
+	let state = app.state::<Dictation>();
+	if state.gigaam_suggested.swap(true, Ordering::Relaxed) {
+		return;
+	}
+	let _ = app.emit("gigaam-suggest", ());
+	tauri::async_runtime::spawn(async move {
+		use ashpd::desktop::notification::NotificationProxy;
+		let Ok(proxy) = NotificationProxy::new().await else {
+			return;
+		};
+		let notification = ashpd::desktop::notification::Notification::new("wtf")
+			.body("Russian dictation can use the GigaAM engine - download it in Settings, Model section.");
+		let _ = proxy.add_notification("wtf-gigaam-suggest", notification).await;
+	});
+}
+
+/// Drops both cached engines: model weights and whisper state are freed
 /// (GPU VRAM + host memory); the next dictation reloads lazily.
 pub fn unload_transcriber(app: &tauri::AppHandle) {
 	let state = app.state::<Dictation>();
-	let mut cached = state.transcriber.lock().unwrap();
-	if cached.take().is_some() {
-		eprintln!("model unloaded");
+	let whisper = state.whisper.lock().unwrap().take().is_some();
+	let gigaam = state.gigaam.lock().unwrap().take().is_some();
+	if whisper || gigaam {
+		eprintln!("models unloaded");
+	}
+}
+
+/// Drops only the cached GigaAM engine (its model file changed or was
+/// deleted).
+pub fn unload_gigaam(app: &tauri::AppHandle) {
+	let state = app.state::<Dictation>();
+	if state.gigaam.lock().unwrap().take().is_some() {
+		eprintln!("gigaam model unloaded");
 	}
 }
 
@@ -183,7 +247,7 @@ pub fn unload_model(app: tauri::AppHandle) {
 	unload_transcriber(&app);
 }
 
-fn transcribe_cached(
+fn transcribe_whisper_cached(
 	app: &tauri::AppHandle,
 	model: &std::path::Path,
 	samples: &[f32],
@@ -192,12 +256,12 @@ fn transcribe_cached(
 ) -> Result<(String, String), String> {
 	let settings = settings::load();
 	let state = app.state::<Dictation>();
-	let mut cached = state.transcriber.lock().unwrap();
+	let mut cached = state.whisper.lock().unwrap();
 	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
 		eprintln!("loading model {}...", model.display());
 		*cached = Some((
 			model.to_path_buf(),
-			asr::Transcriber::new(
+			asr::Transcriber::whisper(
 				&model.to_string_lossy(),
 				settings.gpu_device,
 				settings.use_gpu,
@@ -209,4 +273,26 @@ fn transcribe_cached(
 		.expect("transcriber was just stored")
 		.1
 		.transcribe(samples, language, initial_prompt)
+}
+
+fn transcribe_gigaam_cached(
+	app: &tauri::AppHandle,
+	model: &std::path::Path,
+	samples: &[f32],
+) -> Result<String, String> {
+	let state = app.state::<Dictation>();
+	let mut cached = state.gigaam.lock().unwrap();
+	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
+		eprintln!("loading gigaam model {}...", model.display());
+		*cached = Some((
+			model.to_path_buf(),
+			asr::Transcriber::GigaAm(crate::gigaam::GigaAm::new(model)?),
+		));
+	}
+	let (text, _lang) = cached
+		.as_mut()
+		.expect("transcriber was just stored")
+		.1
+		.transcribe(samples, Some("ru"), None)?;
+	Ok(text)
 }

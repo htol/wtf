@@ -20,8 +20,9 @@ pub fn to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
 	}
 }
 
-/// Whisper input rate (DESIGN.md, "Pipeline").
-pub const WHISPER_SAMPLE_RATE: u32 = 16000;
+/// ASR input rate (DESIGN.md, "Pipeline"): both engines — whisper and
+/// GigaAM — take 16 kHz mono f32.
+pub const SAMPLE_RATE: u32 = 16000;
 
 /// Largest absolute sample amplitude, 0.0..=1.0.
 pub fn peak(samples: &[f32]) -> f32 {
@@ -236,6 +237,6 @@ impl Recorder {
 		drop(self.stream);
 		let mut buffer = self.samples.lock().unwrap();
 		let samples = std::mem::take(&mut *buffer);
-		Ok(resample(&samples, self.sample_rate, WHISPER_SAMPLE_RATE))
+		Ok(resample(&samples, self.sample_rate, SAMPLE_RATE))
 	}
 }

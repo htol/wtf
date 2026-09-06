@@ -1,10 +1,6 @@
-//! Transcription seam over whisper-rs.
-//!
-//! Runtime GPU backend selection: whisper.cpp registers every backend the
-//! binary was built with (cuda, vulkan) and picks a device by index; the index
-//! comes from settings (`gpu_device`). Loading a model is expensive, so
-//! `Transcriber` (model + whisper state) is created once and cached in app
-//! state.
+//! Transcription seam: whisper (`whisper-rs`) and GigaAM (`gigaam`), two
+//! engines behind one enum. The pipeline routes by language (see
+//! pipeline.rs); both engines are cached in app state once loaded.
 
 /// A GPU visible to the ASR backend. `index` is the backend's device ordinal
 /// that whisper's `gpu_device` setting expects (Vulkan physical-device order
@@ -117,14 +113,53 @@ mod tests {
 	}
 }
 
+/// The active ASR engine. Both variants are cached by the pipeline keyed
+/// by model path (loading is expensive); `transcribe` is the common seam.
+pub enum Transcriber {
+	#[cfg(feature = "asr")]
+	Whisper(WhisperTranscriber),
+	GigaAm(crate::gigaam::GigaAm),
+}
+
+impl Transcriber {
+	#[cfg(feature = "asr")]
+	pub fn whisper(model_path: &str, gpu_device: i32, use_gpu: bool) -> Result<Self, String> {
+		Ok(Self::Whisper(WhisperTranscriber::new(model_path, gpu_device, use_gpu)?))
+	}
+
+	#[cfg(not(feature = "asr"))]
+	pub fn whisper(_model_path: &str, _gpu_device: i32, _use_gpu: bool) -> Result<Self, String> {
+		Err("built without the `asr` feature".into())
+	}
+
+	/// `samples`: 16 kHz mono f32. `language`: language code, "auto", or
+	/// None. `initial_prompt`: whisper-only decoder conditioning text
+	/// (GigaAM has no prompt input; it is ignored on that path). Returns the
+	/// transcript and the effective language code (forced or detected).
+	pub fn transcribe(
+		&mut self,
+		samples: &[f32],
+		language: Option<&str>,
+		initial_prompt: Option<&str>,
+	) -> Result<(String, String), String> {
+		match self {
+			#[cfg(feature = "asr")]
+			Self::Whisper(whisper) => whisper.transcribe(samples, language, initial_prompt),
+			// The GigaAM path is Russian by construction (pipeline routing).
+			Self::GigaAm(gigaam) => Ok((gigaam.transcribe(samples)?, "ru".into())),
+		}
+	}
+}
+
 #[cfg(feature = "asr")]
-pub struct Transcriber {
+pub struct WhisperTranscriber {
 	/// Reused across transcriptions: `create_state()` allocates the KV cache
 	/// and compute buffers (~700 MB on large-v3, ~70 ms) on every call.
 	state: whisper_rs::WhisperState,
 }
 
-impl Transcriber {
+#[cfg(feature = "asr")]
+impl WhisperTranscriber {
 	pub fn new(model_path: &str, gpu_device: i32, use_gpu: bool) -> Result<Self, String> {
 		let mut params = whisper_rs::WhisperContextParameters::default();
 		params.use_gpu = use_gpu;
@@ -201,10 +236,10 @@ fn lang_code(id: i32) -> String {
 }
 
 #[cfg(not(feature = "asr"))]
-pub struct Transcriber;
+pub struct WhisperTranscriber;
 
 #[cfg(not(feature = "asr"))]
-impl Transcriber {
+impl WhisperTranscriber {
 	pub fn new(_model_path: &str, _gpu_device: i32, _use_gpu: bool) -> Result<Self, String> {
 		Err("built without the `asr` feature".into())
 	}

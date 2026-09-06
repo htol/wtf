@@ -1,4 +1,4 @@
-# wtf - local voice-to-text dictation (Tauri 2 + whisper.cpp)
+# wtf - local voice-to-text dictation (Tauri 2 + whisper.cpp + GigaAM)
 
 ## Decisions
 
@@ -16,6 +16,15 @@ make enable     # systemctl --user enable --now app-wtf.service
 make check      # cargo check (default features)
 make clean      # clean cargo + vite artifacts
 ```
+
+## Engines
+
+Whisper handles auto-detect and all languages; Russian dictation routes to
+the GigaAM v3 engine (`ort`/ONNX Runtime, CPU) when its model is downloaded —
+Settings, "Russian engine" cards. Model files live in
+`~/.local/share/wtf/models/gigaam/`; the mel preprocessor and Silero VAD
+graphs are vendored in `src-tauri/assets/` (MIT). The first build downloads
+a prebuilt libonnxruntime (cargo feature `download-binaries` of `ort`).
 
 ## Runtime dependencies
 

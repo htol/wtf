@@ -25,6 +25,9 @@ pub struct Settings {
 	pub model_path: Option<String>,
 	/// Chosen model id (see models::MODEL_CHOICES); None = most recent download.
 	pub model_id: Option<String>,
+	/// Chosen GigaAM model id (see models::GIGAAM_CHOICES); None = most
+	/// recent download in the gigaam subdir.
+	pub gigaam_model_id: Option<String>,
 	/// Named initial prompts; `active_prompt` names the one in use (None = off).
 	pub prompts: Vec<NamedPrompt>,
 	pub active_prompt: Option<String>,
@@ -44,6 +47,7 @@ impl Default for Settings {
 			use_gpu: true,
 			model_path: None,
 			model_id: None,
+			gigaam_model_id: None,
 			prompts: vec![NamedPrompt {
 				name: "ru-en mix".into(),
 				text: "Сегодня у нас meeting по архитектуре, я закинул PR и обновил roadmap. "
@@ -94,6 +98,9 @@ pub fn set_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Str
 		|| settings.use_gpu != previous.use_gpu
 	{
 		crate::pipeline::unload_transcriber(&app);
+	} else if settings.gigaam_model_id != previous.gigaam_model_id {
+		// Only the GigaAM pick changed: drop that engine, keep whisper cached.
+		crate::pipeline::unload_gigaam(&app);
 	}
 	Ok(())
 }

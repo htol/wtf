@@ -64,65 +64,89 @@
 	});
 </script>
 
-<div class="prompts">
-	<div class="list">
-		<button type="button" class="primary add" onclick={() => add()}>+ New prompt</button>
-		{#each prompts as prompt (prompt.name)}
-			<div
-				class="item"
-				class:selected={prompt.name === selectedName}
-				onclick={() => select(prompt.name)}
-				onkeydown={(e) => e.key === 'Enter' && select(prompt.name)}
-				role="button"
-				tabindex="0"
-			>
-				<span class="name">{prompt.name}</span>
-				{#if active === prompt.name}
-					<span class="badge">active</span>
-				{/if}
-			</div>
-		{/each}
-	</div>
-
-	{#if selected}
-		<div class="editor">
-			<div class="row">
-				<input
-					type="text"
-					bind:value={selected.name}
-					onchange={() => {
-						if (active === selectedName) active = selected.name;
-						selectedName = selected.name;
-					}}
-				/>
-				<button
-					type="button"
-					class={active === selected.name ? '' : 'primary'}
-					onclick={() => activate(selected.name)}
+<div class="wrap">
+	<p class="banner">
+		Prompts apply to Whisper only (auto mode / other languages). Russian
+		dictation uses the GigaAM engine, which does not support prompts.
+	</p>
+	<div class="prompts">
+		<div class="list">
+			<button type="button" class="primary add" onclick={() => add()}>+ New prompt</button>
+			{#each prompts as prompt (prompt.name)}
+				<div
+					class="item"
+					class:selected={prompt.name === selectedName}
+					onclick={() => select(prompt.name)}
+					onkeydown={(e) => e.key === 'Enter' && select(prompt.name)}
+					role="button"
+					tabindex="0"
 				>
-					{active === selected.name ? 'Deactivate' : 'Activate'}
-				</button>
-				<button type="button" class="danger" onclick={() => remove(selected.name)}>Delete</button>
-			</div>
-			<textarea
-				bind:value={selected.text}
-				placeholder="Example sentences in the style you want transcribed, e.g. mixed Russian/English speech. This conditions the decoder's style and vocabulary — it is not an instruction the model follows."
-			></textarea>
-			<div class="row save-row">
-				<button type="button" class="primary" onclick={() => persist()}>Save</button>
-				{#if savedAt}<span class="muted">saved at {savedAt}</span>{/if}
-			</div>
+					<span class="name">{prompt.name}</span>
+					{#if active === prompt.name}
+						<span class="badge">active</span>
+					{/if}
+				</div>
+			{/each}
 		</div>
-	{:else}
-		<p class="hint">No prompt selected. Create one, write a few example sentences, activate it.</p>
-	{/if}
+
+		{#if selected}
+			<div class="editor">
+				<div class="row">
+					<input
+						type="text"
+						bind:value={selected.name}
+						onchange={() => {
+							if (active === selectedName) active = selected.name;
+							selectedName = selected.name;
+						}}
+					/>
+					<button
+						type="button"
+						class={active === selected.name ? '' : 'primary'}
+						onclick={() => activate(selected.name)}
+					>
+						{active === selected.name ? 'Deactivate' : 'Activate'}
+					</button>
+					<button type="button" class="danger" onclick={() => remove(selected.name)}>Delete</button>
+				</div>
+				<textarea
+					bind:value={selected.text}
+					placeholder="Example sentences in the style you want transcribed, e.g. mixed Russian/English speech. This conditions the decoder's style and vocabulary — it is not an instruction the model follows."
+				></textarea>
+				<div class="row save-row">
+					<button type="button" class="primary" onclick={() => persist()}>Save</button>
+					{#if savedAt}<span class="muted">saved at {savedAt}</span>{/if}
+				</div>
+			</div>
+		{:else}
+			<p class="hint">No prompt selected. Create one, write a few example sentences, activate it.</p>
+		{/if}
+	</div>
 </div>
 
 <style>
+	.wrap {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		height: 100%;
+	}
+
+	.banner {
+		margin: 0;
+		padding: 8px 12px;
+		border: 1px solid var(--nord2);
+		border-radius: 6px;
+		color: var(--nord9);
+		font-size: 12px;
+	}
+
 	.prompts {
 		display: flex;
 		gap: 20px;
 		height: 100%;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.list {

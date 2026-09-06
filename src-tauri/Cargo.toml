@@ -40,6 +40,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 whisper-rs = { version = "0.16", optional = true }
 ash = { version = "0.38.0", features = ["loaded"], optional = true }
+# GigaAM engine: ONNX Runtime (CPU EP). Pinned pre-release: a floating caret
+# would silently pull 2.0.0 finals with a different API. Default features
+# include `download-binaries` (prebuilt libonnxruntime fetched at build time).
+ort = "=2.0.0-rc.13"
 
 [profile.release]
 strip = true

@@ -9,6 +9,7 @@
 		use_gpu: boolean;
 		model_path: string | null;
 		model_id: string | null;
+		gigaam_model_id: string | null;
 		silence_peak: number;
 		overlay_x: number;
 		overlay_y: number;
@@ -28,6 +29,16 @@
 		pci_bus_id: string;
 	}
 
+	interface GigaamModelInfo {
+		id: string;
+		file: string;
+		note: string;
+		installed: boolean;
+		size_bytes: number | null;
+		approx_bytes: number;
+		active: boolean;
+	}
+
 	interface DownloadProgress {
 		id: string;
 		downloaded: number;
@@ -43,6 +54,7 @@
 
 	let settings = $state<Settings | null>(null);
 	let models = $state<ModelInfo[]>([]);
+	let gigaamModels = $state<GigaamModelInfo[]>([]);
 	let gpus = $state<GpuDevice[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	let savedAt = $state<string | null>(null);
@@ -62,6 +74,9 @@
 			manualPath: settings?.model_path ?? null,
 			modelId: settings?.model_id ?? null
 		});
+		gigaamModels = await invoke<GigaamModelInfo[]>('list_gigaam_models', {
+			gigaamModelId: settings?.gigaam_model_id ?? null
+		});
 	}
 
 	// Model and GPU pickers save immediately: a choice without a download
@@ -77,6 +92,7 @@
 		current.use_gpu = settings.use_gpu;
 		current.model_path = settings.model_path;
 		current.model_id = settings.model_id;
+		current.gigaam_model_id = settings.gigaam_model_id;
 		current.silence_peak = settings.silence_peak;
 		await invoke('set_settings', { settings: current });
 	}
@@ -110,6 +126,40 @@
 	async function removeModel() {
 		if (!selectedModel || !confirm(`Delete ${selectedModel.id} from disk?`)) return;
 		await invoke('delete_model', { modelId: selectedModel.id });
+		await refreshModels();
+	}
+
+	function gigaamProgress(id: string) {
+		return progress[id] && !progress[id].done ? progress[id] : null;
+	}
+
+	async function downloadGigaam(id: string) {
+		progress[id] = { id, downloaded: 0, total: null, done: false };
+		try {
+			await invoke('download_gigaam_model', { modelId: id });
+		} catch (e) {
+			alert(`Download failed: ${e}`);
+		}
+		delete progress[id];
+		await refreshModels();
+	}
+
+	async function removeGigaam(id: string) {
+		const model = gigaamModels.find((m) => m.id === id);
+		if (!model || !confirm(`Delete ${model.id} from disk?`)) return;
+		await invoke('delete_gigaam_model', { modelId: id });
+		// The deleted card may have been the pinned pick.
+		if (settings?.gigaam_model_id === id) {
+			settings.gigaam_model_id = null;
+			await persistOwn();
+		}
+		await refreshModels();
+	}
+
+	async function pickGigaam(id: string | null) {
+		if (!settings) return;
+		settings.gigaam_model_id = id;
+		await persistOwn();
 		await refreshModels();
 	}
 
@@ -261,6 +311,89 @@
 		</section>
 
 		<section>
+			<h2>Russian engine — GigaAM</h2>
+			<p class="hint">
+				Used automatically when the language is Russian; CPU-only. Auto-detect
+				and other languages stay on Whisper. Without a downloaded model,
+				Russian also falls back to Whisper.
+			</p>
+			<div class="cards">
+				<div
+					class="card"
+					class:active={settings.gigaam_model_id === null && gigaamModels.some((m) => m.installed)}
+					role="button"
+					tabindex="0"
+					onclick={() => pickGigaam(null)}
+					onkeydown={(e) => e.key === 'Enter' && pickGigaam(null)}
+				>
+					<span class="name">Auto</span>
+					<span class="desc">the most recent download is used</span>
+				</div>
+				{#each gigaamModels as model (model.id)}
+					{@const p = gigaamProgress(model.id)}
+					<div
+						class="card"
+						class:active={model.active}
+						role="button"
+						tabindex="0"
+						onclick={() => pickGigaam(model.id)}
+						onkeydown={(e) => e.key === 'Enter' && pickGigaam(model.id)}
+					>
+						<div class="head">
+							<span class="name">{model.id}</span>
+							{#if model.active}<span class="badge">active</span>{/if}
+						</div>
+						<span class="desc">{model.note}</span>
+						<span class="size">
+							{model.installed
+								? formatSize(model.size_bytes)
+								: `download ≈ ${formatSize(model.approx_bytes)}`}
+						</span>
+						{#if p}
+							<div class="progress">
+								<div
+									class="bar"
+									style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"
+								></div>
+								<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
+							</div>
+						{:else if model.installed}
+							<div class="actions">
+								<button
+									type="button"
+									class="icon"
+									title="Re-download"
+									onclick={() => downloadGigaam(model.id)}
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
+								</button>
+								<button
+									type="button"
+									class="icon danger"
+									title="Delete from disk"
+									onclick={() => removeGigaam(model.id)}
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+								</button>
+							</div>
+						{:else}
+							<div class="actions">
+								<button
+									type="button"
+									class="icon"
+									title="Download"
+									onclick={() => downloadGigaam(model.id)}
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+								</button>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</section>
+
+		<section>
 		<h2>Shortcuts</h2>
 		<p class="hint">
 			Global shortcuts are bound via the desktop portal (KDE). Rebinding opens the
@@ -405,5 +538,68 @@
 		display: flex;
 		align-items: center;
 		gap: 12px;
+	}
+
+	.cards {
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.card {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		min-width: 200px;
+		padding: 10px 12px;
+		border: 1px solid var(--nord1);
+		border-radius: 6px;
+		cursor: pointer;
+		color: var(--nord4);
+	}
+
+	.card:hover {
+		background: var(--nord1);
+	}
+
+	.card.active {
+		border-color: var(--nord10);
+		background: var(--nord1);
+	}
+
+	.card .head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.card .name {
+		font-weight: 600;
+		color: var(--nord6);
+	}
+
+	.card .badge {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--nord7);
+		margin-left: auto;
+	}
+
+	.card .desc,
+	.card .size {
+		font-size: 12px;
+		color: var(--nord3);
+	}
+
+	.card .actions {
+		gap: 4px;
+	}
+
+	.card .progress {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 160px;
 	}
 </style>

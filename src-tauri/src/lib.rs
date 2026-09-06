@@ -7,6 +7,7 @@
 mod app_id;
 mod asr;
 mod audio;
+mod gigaam;
 mod history;
 mod hotkey;
 mod inject;
@@ -95,6 +96,9 @@ pub fn run() {
 			models::download_model,
 			models::delete_model,
 			models::open_models_dir,
+			models::list_gigaam_models,
+			models::download_gigaam_model,
+			models::delete_gigaam_model,
 			inject::copy_to_clipboard,
 			asr::list_gpu_devices,
 			hotkey::rebind_shortcuts,
