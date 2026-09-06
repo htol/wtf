@@ -62,6 +62,9 @@
 		{ value: 'ru-whisper', label: 'RU (Whisper)' }
 	];
 
+	type SubTab = 'general' | 'whisper' | 'gigaam' | 'shortcuts';
+
+	let subTab = $state<SubTab>('general');
 	let settings = $state<Settings | null>(null);
 	let models = $state<ModelInfo[]>([]);
 	let gigaamModels = $state<GigaamModelInfo[]>([]);
@@ -208,8 +211,8 @@
 	}
 
 	// One run covers both engines (both catalogs are fetched and hashed
-	// together). The single button lives in the Model section; GigaAM
-	// verdicts surface as badges on its cards.
+	// together). The single button lives on the General sub-tab; verdicts
+	// surface in its report row and as badges on GigaAM cards.
 	async function checkUpdates() {
 		if (checking) return;
 		checking = true;
@@ -266,221 +269,255 @@
 
 {#if settings}
 	<form onsubmit={(e) => { e.preventDefault(); save(); }}>
-		<section>
-			<h2>Dictation</h2>
-			<label>
-				Language
-				<select bind:value={settings.language}>
-					{#each LANGUAGES as lang (lang.value)}
-						<option value={lang.value}>{lang.label}</option>
-					{/each}
-				</select>
-			</label>
-			<label>
-				<input type="checkbox" bind:checked={settings.use_gpu} />
-				Run inference on GPU
-			</label>
-			{#if gpus.length > 0}
-				<label>
-					GPU device
-					<select value={settings.gpu_device} onchange={(e) => pickGpu(Number(e.currentTarget.value))}>
-						{#each gpus as gpu (gpu.index)}
-							<option value={gpu.index}>
-								{gpu.pci_bus_id ? `${gpu.name} — ${gpu.pci_bus_id}` : gpu.name}
-							</option>
-						{/each}
-					</select>
-				</label>
-			{:else}
-				<label>
-					GPU device index
-					<input type="number" min="0" bind:value={settings.gpu_device} disabled={!settings.use_gpu} />
-				</label>
-			{/if}
-			<label>
-				Silence threshold (0–1; recordings below it are skipped, 0 = off)
-				<input
-					type="number"
-					min="0"
-					max="1"
-					step="0.01"
-					bind:value={settings.silence_peak}
-				/>
-			</label>
-		</section>
+		<nav class="subnav">
+			<button type="button" class:active={subTab === 'general'} onclick={() => (subTab = 'general')}>
+				General
+			</button>
+			<button type="button" class:active={subTab === 'whisper'} onclick={() => (subTab = 'whisper')}>
+				Whisper
+			</button>
+			<button type="button" class:active={subTab === 'gigaam'} onclick={() => (subTab = 'gigaam')}>
+				GigaAM
+			</button>
+			<button
+				type="button"
+				class:active={subTab === 'shortcuts'}
+				onclick={() => (subTab = 'shortcuts')}
+			>
+				Shortcuts
+			</button>
+		</nav>
+		<div class="pane">
+			{#if subTab === 'general'}
+				<section>
+					<h2>Dictation</h2>
+					<label>
+						Language
+						<select bind:value={settings.language}>
+							{#each LANGUAGES as lang (lang.value)}
+								<option value={lang.value}>{lang.label}</option>
+							{/each}
+						</select>
+					</label>
+					<label>
+						Silence threshold (0–1; recordings below it are skipped, 0 = off)
+						<input
+							type="number"
+							min="0"
+							max="1"
+							step="0.01"
+							bind:value={settings.silence_peak}
+						/>
+					</label>
+				</section>
 
-		<section>
-			<h2>Model</h2>
-			<div class="row">
-				<select value={settings.model_id ?? ''} onchange={(e) => pickModel(e.currentTarget.value || null)}>
-					<option value="">Auto (latest downloaded)</option>
-					{#each models as model (model.id)}
-						<option value={model.id}>
-							{model.id}{model.installed ? ` (${formatSize(model.size_bytes)})` : ''}
-						</option>
-					{/each}
-				</select>
-				{#if selectedModel}
-					{#if progress[selectedModel.id] && !progress[selectedModel.id].done}
-						{@const p = progress[selectedModel.id]}
-						<div class="progress">
-							<div class="bar" style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"></div>
-							<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
-						</div>
-					{:else}
-						{#if selectedModel.installed}
-							<span class="installed" title="Downloaded">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+				<section>
+					<h2>Model updates</h2>
+					<div class="report">
+						<button type="button" disabled={checking} onclick={() => checkUpdates()}>
+							{checking ? 'Checking…' : 'Check for updates'}
+						</button>
+						{#each [...models, ...gigaamModels].filter((m) => m.installed && updates[m.id] !== undefined) as m (m.id)}
+							<span class={updates[m.id] ? 'ok' : 'stale'}>
+								{m.id}: {updates[m.id] ? 'up to date' : 'update available'}
 							</span>
-						{/if}
-						<button type="button" class="icon" title={selectedModel.installed ? 'Re-download' : 'Download'} onclick={() => download()}>
-							{#if selectedModel.installed}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
-							{:else}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-							{/if}
-						</button>
-						{#if selectedModel.installed}
-							<button type="button" class="icon danger" title="Delete from disk" onclick={() => removeModel()}>
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-							</button>
-						{/if}
-						<button type="button" class="icon" title="Show models folder" onclick={() => openModelsDir()}>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
-						</button>
-					{/if}
-				{/if}
-			</div>
-			<div class="report">
-				<button type="button" disabled={checking} onclick={() => checkUpdates()}>
-					{checking ? 'Checking…' : 'Check for updates'}
-				</button>
-				{#each models.filter((m) => m.installed && updates[m.id] !== undefined) as m (m.id)}
-					<span class={updates[m.id] ? 'ok' : 'stale'}>
-						{m.id}: {updates[m.id] ? 'up to date' : 'update available'}
-					</span>
-				{/each}
-			</div>
-			<p class="hint">
-				Hashes installed models and compares them with huggingface.co (both engines).
-			</p>
-			<label>
-				Manual model path (overrides the picker)
-				<input
-					type="text"
-					placeholder="/path/to/ggml-model.bin"
-					value={settings.model_path ?? ''}
-					onchange={(e) => (settings!.model_path = e.currentTarget.value || null)}
-				/>
-			</label>
-			<div class="row">
-				<button type="button" onclick={() => unloadModel()}>Unload model from memory</button>
-				{#if unloadedAt}<span class="muted">unloaded at {unloadedAt}</span>{/if}
-			</div>
-			<p class="hint">
-				Frees the model weights from GPU/system memory; it reloads on the next
-				dictation. Switching models here unloads automatically.
-			</p>
-		</section>
+						{/each}
+					</div>
+					<p class="hint">
+						Hashes installed models of both engines and compares them with huggingface.co.
+					</p>
+				</section>
 
-		<section>
-			<h2>Russian engine — GigaAM</h2>
-			<p class="hint">
-				Used when the language is RU (GigaAM); CPU-only. Auto, EN and RU
-				(Whisper) stay on Whisper. Without a downloaded model, RU (GigaAM)
-				also falls back to Whisper.
-		</p>
-		<div class="cards">
-				<div
-					class="card"
-					class:active={settings.gigaam_model_id === null && gigaamModels.some((m) => m.installed)}
-					role="button"
-					tabindex="0"
-					onclick={() => pickGigaam(null)}
-					onkeydown={(e) => e.key === 'Enter' && pickGigaam(null)}
-				>
-					<span class="name">Auto</span>
-					<span class="desc">the most recent download is used</span>
-				</div>
-				{#each gigaamModels as model (model.id)}
-					{@const p = gigaamProgress(model.id)}
-					<div
-						class="card"
-						class:active={model.active}
-						role="button"
-						tabindex="0"
-						onclick={() => pickGigaam(model.id)}
-						onkeydown={(e) => e.key === 'Enter' && pickGigaam(model.id)}
-					>
-						<div class="head">
-							<span class="name">{model.id}</span>
-							{#if updates[model.id] !== undefined}
-								<span class="badge {updates[model.id] ? 'ok' : 'stale'}">
-									{updates[model.id] ? 'up to date' : 'update available'}
-								</span>
+				<section>
+					<h2>Memory</h2>
+					<div class="row">
+						<button type="button" onclick={() => unloadModel()}>Unload models from memory</button>
+						{#if unloadedAt}<span class="muted">unloaded at {unloadedAt}</span>{/if}
+					</div>
+					<p class="hint">
+						Frees the weights of both engines from GPU/system memory; they reload on the
+						next dictation. Switching models unloads automatically.
+					</p>
+				</section>
+			{:else if subTab === 'whisper'}
+				<section>
+					<h2>Inference</h2>
+					<label>
+						<input type="checkbox" bind:checked={settings.use_gpu} />
+						Run inference on GPU
+					</label>
+					{#if gpus.length > 0}
+						<label>
+							GPU device
+							<select value={settings.gpu_device} onchange={(e) => pickGpu(Number(e.currentTarget.value))}>
+								{#each gpus as gpu (gpu.index)}
+									<option value={gpu.index}>
+										{gpu.pci_bus_id ? `${gpu.name} — ${gpu.pci_bus_id}` : gpu.name}
+									</option>
+								{/each}
+							</select>
+						</label>
+					{:else}
+						<label>
+							GPU device index
+							<input type="number" min="0" bind:value={settings.gpu_device} disabled={!settings.use_gpu} />
+						</label>
+					{/if}
+				</section>
+
+				<section>
+					<h2>Model</h2>
+					<div class="row">
+						<select value={settings.model_id ?? ''} onchange={(e) => pickModel(e.currentTarget.value || null)}>
+							<option value="">Auto (latest downloaded)</option>
+							{#each models as model (model.id)}
+								<option value={model.id}>
+									{model.id}{model.installed ? ` (${formatSize(model.size_bytes)})` : ''}
+								</option>
+							{/each}
+						</select>
+						{#if selectedModel}
+							{#if progress[selectedModel.id] && !progress[selectedModel.id].done}
+								{@const p = progress[selectedModel.id]}
+								<div class="progress">
+									<div class="bar" style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"></div>
+									<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
+								</div>
+							{:else}
+								{#if selectedModel.installed}
+									<span class="installed" title="Downloaded">
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+									</span>
+								{/if}
+								<button type="button" class="icon" title={selectedModel.installed ? 'Re-download' : 'Download'} onclick={() => download()}>
+									{#if selectedModel.installed}
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
+									{:else}
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+									{/if}
+								</button>
+								{#if selectedModel.installed}
+									<button type="button" class="icon danger" title="Delete from disk" onclick={() => removeModel()}>
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+									</button>
+								{/if}
+								<button type="button" class="icon" title="Show models folder" onclick={() => openModelsDir()}>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+								</button>
 							{/if}
-							{#if model.active}<span class="badge">active</span>{/if}
-						</div>
-						<span class="desc">{model.note}</span>
-						<span class="size">
-							{model.installed
-								? formatSize(model.size_bytes)
-								: `download ≈ ${formatSize(model.approx_bytes)}`}
-						</span>
-						{#if p}
-							<div class="progress">
-								<div
-									class="bar"
-									style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"
-								></div>
-								<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
-							</div>
-						{:else if model.installed}
-							<div class="actions">
-								<button
-									type="button"
-									class="icon"
-									title="Re-download"
-									onclick={() => downloadGigaam(model.id)}
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
-								</button>
-								<button
-									type="button"
-									class="icon danger"
-									title="Delete from disk"
-									onclick={() => removeGigaam(model.id)}
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-								</button>
-							</div>
-						{:else}
-							<div class="actions">
-								<button
-									type="button"
-									class="icon"
-									title="Download"
-									onclick={() => downloadGigaam(model.id)}
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-								</button>
-							</div>
 						{/if}
 					</div>
-				{/each}
-			</div>
-		</section>
-
-		<section>
-		<h2>Shortcuts</h2>
-		<p class="hint">
-			Global shortcuts are bound via the desktop portal (KDE). Rebinding opens the
-			Plasma dialog for both shortcuts.
-		</p>
-		<button type="button" onclick={() => rebind()}>Rebind shortcuts</button>
-		{#if rebindResult}<span class="muted">{rebindResult}</span>{/if}
-	</section>
-</form>
+					<label>
+						Manual model path (overrides the picker)
+						<input
+							type="text"
+							placeholder="/path/to/ggml-model.bin"
+							value={settings.model_path ?? ''}
+							onchange={(e) => (settings!.model_path = e.currentTarget.value || null)}
+						/>
+					</label>
+				</section>
+			{:else if subTab === 'gigaam'}
+				<section>
+					<p class="hint">
+						Used when the language is RU (GigaAM); CPU-only. Auto, EN and RU
+						(Whisper) stay on Whisper. Without a downloaded model, RU (GigaAM)
+						also falls back to Whisper.
+					</p>
+					<div class="cards">
+						<div
+							class="card"
+							class:active={settings.gigaam_model_id === null && gigaamModels.some((m) => m.installed)}
+							role="button"
+							tabindex="0"
+							onclick={() => pickGigaam(null)}
+							onkeydown={(e) => e.key === 'Enter' && pickGigaam(null)}
+						>
+							<span class="name">Auto</span>
+							<span class="desc">the most recent download is used</span>
+						</div>
+						{#each gigaamModels as model (model.id)}
+							{@const p = gigaamProgress(model.id)}
+							<div
+								class="card"
+								class:active={model.active}
+								role="button"
+								tabindex="0"
+								onclick={() => pickGigaam(model.id)}
+								onkeydown={(e) => e.key === 'Enter' && pickGigaam(model.id)}
+							>
+								<div class="head">
+									<span class="name">{model.id}</span>
+									{#if updates[model.id] !== undefined}
+										<span class="badge {updates[model.id] ? 'ok' : 'stale'}">
+											{updates[model.id] ? 'up to date' : 'update available'}
+										</span>
+									{/if}
+									{#if model.active}<span class="badge">active</span>{/if}
+								</div>
+								<span class="desc">{model.note}</span>
+								<span class="size">
+									{model.installed
+										? formatSize(model.size_bytes)
+										: `download ≈ ${formatSize(model.approx_bytes)}`}
+								</span>
+								{#if p}
+									<div class="progress">
+										<div
+											class="bar"
+											style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"
+										></div>
+										<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
+									</div>
+								{:else if model.installed}
+									<div class="actions">
+										<button
+											type="button"
+											class="icon"
+											title="Re-download"
+											onclick={() => downloadGigaam(model.id)}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
+										</button>
+										<button
+											type="button"
+											class="icon danger"
+											title="Delete from disk"
+											onclick={() => removeGigaam(model.id)}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+										</button>
+									</div>
+								{:else}
+									<div class="actions">
+										<button
+											type="button"
+											class="icon"
+											title="Download"
+											onclick={() => downloadGigaam(model.id)}
+										>
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+										</button>
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				</section>
+			{:else}
+				<section>
+					<p class="hint">
+						Global shortcuts are bound via the desktop portal (KDE). Rebinding opens
+						the Plasma dialog for both shortcuts.
+					</p>
+					<div class="row">
+						<button type="button" onclick={() => rebind()}>Rebind shortcuts</button>
+						{#if rebindResult}<span class="muted">{rebindResult}</span>{/if}
+					</div>
+				</section>
+			{/if}
+		</div>
+	</form>
 {:else}
 	<p class="hint">Loading settings…</p>
 {/if}
@@ -488,8 +525,48 @@
 <style>
 	form {
 		display: flex;
+		align-items: flex-start;
+		gap: 24px;
+	}
+
+	/* Vertical sub-tab strip on the left edge of the Settings tab;
+	 * stays in view while the pane next to it scrolls. */
+	.subnav {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: 110px;
+		flex-shrink: 0;
+		position: sticky;
+		top: 0;
+	}
+
+	.subnav button {
+		text-align: left;
+		border: none;
+		background: transparent;
+		color: var(--nord4);
+		font-size: 12px;
+		padding: 5px 10px;
+		border-radius: 4px;
+	}
+
+	.subnav button:hover {
+		background: var(--nord1);
+	}
+
+	.subnav button.active {
+		background: var(--nord1);
+		color: var(--nord8);
+		font-weight: 600;
+	}
+
+	.pane {
+		display: flex;
 		flex-direction: column;
 		gap: 24px;
+		flex: 1;
+		min-width: 0;
 	}
 
 	section {
