@@ -186,9 +186,12 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 		let model = require_whisper_model(app)?;
 		transcribe_whisper_cached(app, &model, samples, language, prompt)?
 	};
+	// History is written before pasting: a paste failure must not lose the
+	// transcript. Its error is deferred so a history failure does not block
+	// the paste either.
+	let history = history::open().and_then(|conn| history::insert(&conn, &text, &lang));
 	inject::paste(&text)?;
-	let conn = history::open()?;
-	history::insert(&conn, &text, &lang)?;
+	history?;
 	let _ = app.emit("transcript", &text);
 	Ok(())
 }
