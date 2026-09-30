@@ -62,9 +62,7 @@ pub fn run() {
 		// Dictation daemon lives in the tray: closing the settings window
 		// hides it instead of exiting the app (Quit lives in the tray menu);
 		// the overlay is only shown/hidden by the pipeline — but it must obey
-		// close requests. It stays mapped from startup (prime_overlay), so a
-		// refused close would block session logout (KDE shows a "forcibly
-		// log out?" dialog). Nothing closes it mid-session; the only realistic
+		// close requests. Nothing closes it mid-session; the only realistic
 		// source of a close request is the session manager at logout.
 		.on_window_event(|window, event| {
 			if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -79,10 +77,11 @@ pub fn run() {
 			use tauri::Manager;
 			tray::init(app)?;
 			app.manage(pipeline::Dictation::new());
-			// Keep the overlay mapped (1x1 invisible) from startup: on Wayland
-			// every show() of an unmapped window can activate it and steal
-			// focus from the dictation target, while resizes never do.
-			pipeline::prime_overlay(app.handle());
+		// The overlay is unmapped while idle and only mapped by the pipeline
+		// while recording (GTK3 cannot resize a mapped Wayland toplevel, so
+		// show/hide replaced the old collapse-to-1x1). Keeping it from stealing
+		// focus on map is the compositor's job (Hyprland: no_initial_focus rule).
+		pipeline::prime_overlay(app.handle());
 			spawn_hotkeys(app.handle().clone());
 			Ok(())
 		})

@@ -93,50 +93,42 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 	}
 }
 
-/// Maps the overlay window once and collapses it to an invisible 1x1 so it
-/// never needs show() again (see lib.rs setup note).
+/// Prepares the overlay window without mapping it. GTK3 on Wayland cannot
+/// resize a mapped toplevel (`gtk_window_resize` is silently ignored after
+/// map — the compositor owns the size), so the overlay is shown/hidden
+/// instead of collapsed to 1x1. `set_focusable(false)` must run before the
+/// first `show()`; on Wayland first maps can activate the window, so the
+/// compositor config must keep it out of focus (Hyprland: `no_initial_focus`).
 pub fn prime_overlay(app: &tauri::AppHandle) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;
 	};
 	let _ = window.set_focusable(false);
 	let _ = window.set_always_on_top(true);
-	let _ = window.show();
-	let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
-	// First map activates the window on Wayland, asynchronously — later than
-	// any immediate set_focus. Hand focus back to the main window after the
-	// dust settles so keystrokes right after login don't vanish into the
-	// overlay.
-	let main = app.get_webview_window("main");
-	std::thread::spawn(move || {
-		std::thread::sleep(std::time::Duration::from_secs(1));
-		if let Some(main) = &main {
-			let _ = main.set_focus();
-		}
-	});
 }
 
-/// Expands the overlay to its recording size. Positioning is left to KWin
-/// (rule "Remember"): Wayland ignores client-side set_position.
+/// Maps the overlay at its recording size (260x30 from the window config).
+/// Positioning is left to the compositor (KWin rule "Remember", Hyprland
+/// stores the last floating position): Wayland ignores client-side
+/// set_position.
 fn show_overlay(app: &tauri::AppHandle) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;
 	};
-	let _ = window.set_size(tauri::PhysicalSize::new(260, 30));
+	let _ = window.show();
 }
 
-/// Collapses the overlay back to 1x1; on error keeps it expanded briefly to
-/// show the message.
+/// Unmaps the overlay; on error keeps it around briefly to show the message.
 fn hide_overlay(app: &tauri::AppHandle, failed: bool) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;
 	};
 	if !failed {
-		let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
+		let _ = window.hide();
 		return;
 	}
 	std::thread::sleep(std::time::Duration::from_millis(2500));
-	let _ = window.set_size(tauri::PhysicalSize::new(1, 1));
+	let _ = window.hide();
 }
 
 /// Emits `level` events (~10 Hz) while a recorder is active.
