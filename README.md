@@ -31,7 +31,8 @@ a prebuilt libonnxruntime (cargo feature `download-binaries` of `ort`).
 
 - `wl-copy`, `wl-paste` (clipboard injection)
 - `ydotool` + running `ydotoold` (simulated Ctrl+V)
-- xdg-desktop-portal (GlobalShortcuts, notifications) — stock KDE Plasma 6.
+- xdg-desktop-portal (GlobalShortcuts, notifications) — stock KDE Plasma 6
+  (Hyprland: see "Wayland notes, Hyprland"; `xdg-desktop-portal-hyprland`).
   The systemd unit is named `app-wtf.service` and `wtf.desktop` is installed:
   the portal derives the app id for unsandboxed apps from the `app-*`
   user-unit name plus a matching desktop file.
@@ -75,6 +76,37 @@ a prebuilt libonnxruntime (cargo feature `download-binaries` of `ort`).
   Every property needs its paired `*rule=3` (Force) field; without them KWin
   silently ignores the rule. `positionrule=2` (Remember) makes KWin store the
   overlay position — client-side positioning is impossible on Wayland.
+
+### Hyprland
+
+The same `app-*` unit story applies: launch with `make enable`, never from a
+terminal. A process outside an `app-*` unit has no portal app id, so
+GlobalShortcuts registration fails ("An app id is required"), the hotkey hub
+is never put into app state, and the Settings rebind button then hangs
+silently (its command panics on the missing state).
+
+There is no binding dialog — that is a Plasma feature. With
+`xdg-desktop-portal-hyprland`, keys are bound in hyprland.conf via the
+`global` dispatcher; `hyprctl globalshortcuts` lists the registered ids
+(`wtf:record`, `wtf:cycle-language`):
+
+```ini
+bind = ALT, grave, global, wtf:record
+```
+
+The overlay rules replace the KWin rule above (0.56 syntax; every field is
+`<effect> <value>` or `match:<prop> <value>`). `pin` covers keep-above.
+`no_initial_focus` matters because the overlay is mapped on every recording
+(GTK3 cannot resize a mapped Wayland toplevel — `gtk_window_resize` is
+silently ignored after map — so the app shows/hides it instead of resizing)
+and the map must not steal focus from the dictation target.
+
+```ini
+windowrule = float true, match:title ^(wtf-overlay)$
+windowrule = pin true, match:title ^(wtf-overlay)$
+windowrule = decorate false, match:title ^(wtf-overlay)$
+windowrule = no_initial_focus true, match:title ^(wtf-overlay)$
+```
 
 ## NVIDIA note
 
