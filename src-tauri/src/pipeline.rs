@@ -182,9 +182,12 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 	// transcript. Its error is deferred so a history failure does not block
 	// the paste either.
 	let history = history::open().and_then(|conn| history::insert(&conn, &text, &lang));
+	// The `transcript` event is what refreshes the History tab; it must not
+	// be gated on paste success — a failed paste still leaves the new row in
+	// the database, and an open History window would otherwise stay stale.
+	let _ = app.emit("transcript", &text);
 	inject::paste(&text)?;
 	history?;
-	let _ = app.emit("transcript", &text);
 	Ok(())
 }
 
