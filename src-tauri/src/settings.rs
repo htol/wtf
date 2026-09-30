@@ -39,6 +39,10 @@ pub struct Settings {
 	/// Peak amplitude below which a recording counts as silence and never
 	/// reaches whisper (hallucination guard); 0 disables the check.
 	pub silence_peak: f32,
+	/// Hide the settings window at launch; the daemon keeps running in the
+	/// tray and "Open wtf" (tray menu, second-instance handler) brings the
+	/// window back.
+	pub start_hidden: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +64,7 @@ impl Default for Settings {
 			// DESIGN.md: initial indicator position = 20% from bottom.
 			overlay_y: 0.8,
 			silence_peak: 0.1,
+			start_hidden: false,
 		}
 	}
 }

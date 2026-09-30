@@ -14,6 +14,7 @@
 		silence_peak: number;
 		overlay_x: number;
 		overlay_y: number;
+		start_hidden: boolean;
 	}
 
 	interface ModelInfo {
@@ -91,7 +92,8 @@
 			settings.model_path,
 			settings.model_id,
 			settings.gigaam_model_id,
-			settings.silence_peak
+			settings.silence_peak,
+			settings.start_hidden
 		]);
 	}
 
@@ -132,6 +134,7 @@
 		current.model_id = settings.model_id;
 		current.gigaam_model_id = settings.gigaam_model_id;
 		current.silence_peak = settings.silence_peak;
+		current.start_hidden = settings.start_hidden;
 		await invoke('set_settings', { settings: current });
 		// Everything just written matches disk again (model/GPU pickers
 		// persist through this same path).
@@ -309,6 +312,18 @@
 							bind:value={settings.silence_peak}
 						/>
 					</label>
+				</section>
+
+				<section>
+					<h2>Startup</h2>
+					<label>
+						<input type="checkbox" bind:checked={settings.start_hidden} />
+						Start with the window hidden in the tray
+					</label>
+					<p class="hint">
+						The daemon keeps running either way; reopen the window from the
+						tray menu ("Open wtf") or by launching the app again.
+					</p>
 				</section>
 
 				<section>

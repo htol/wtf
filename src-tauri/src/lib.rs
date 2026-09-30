@@ -83,6 +83,14 @@ pub fn run() {
 		// focus on map is the compositor's job (Hyprland: no_initial_focus rule).
 		pipeline::prime_overlay(app.handle());
 			spawn_hotkeys(app.handle().clone());
+			// With start_hidden the settings window stays in the tray at launch;
+			// setup runs before the event loop maps the window, so it never
+			// flashes. The tray menu and single-instance handler show it.
+			if settings::load().start_hidden {
+				if let Some(main) = app.get_webview_window("main") {
+					let _ = main.hide();
+				}
+			}
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
