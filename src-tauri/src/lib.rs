@@ -15,6 +15,7 @@ mod models;
 mod pipeline;
 mod settings;
 mod tray;
+mod vad;
 
 /// Registers the global shortcuts and forwards every activation into the
 /// app as a `shortcut` event (payload: shortcut id). Runs on the tauri
