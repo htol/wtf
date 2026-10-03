@@ -317,7 +317,7 @@ pub async fn download_gigaam_model(app: tauri::AppHandle, model_id: String) -> R
 	.await
 }
 
-/// Small file download without progress events (vocab).
+/// Small file download without progress events (vocab, llama.cpp archive).
 async fn download_file(url: &str, dest: &std::path::Path) -> Result<(), String> {
 	let response = reqwest::get(url)
 		.await
@@ -359,49 +359,53 @@ pub fn delete_gigaam_model(app: tauri::AppHandle, model_id: String) -> Result<()
 
 // --- Qwen3-ASR (multilingual engine; see DESIGN.md "Engines") ---
 
-/// A Qwen3-ASR catalog entry: one HF repo at a pinned revision, stored in
-/// its own subdir (named by `id`) of `qwen_dir()`.
+/// A Qwen3-ASR catalog entry: one HF GGUF repo at a pinned revision, stored
+/// in its own subdir (named by `id`) of `qwen_dir()`.
 pub struct QwenChoice {
 	pub id: &'static str,
 	/// `{owner}/{repo}` on huggingface.
 	repo: &'static str,
 	revision: &'static str,
+	/// The language model and its audio encoder ("mmproj" in llama.cpp).
+	model: &'static str,
+	mmproj: &'static str,
 	/// One-line UI description.
 	pub note: &'static str,
-	/// Download size of `QWEN_FILES` on huggingface (shown before install,
+	/// Download size of both files on huggingface (shown before install,
 	/// and the progress total).
 	pub approx_bytes: u64,
+}
+
+impl QwenChoice {
+	fn files(&self) -> [&'static str; 2] {
+		[self.mmproj, self.model]
+	}
+
+	fn installed(&self) -> bool {
+		let dir = qwen_dir().join(self.id);
+		self.files().iter().all(|file| dir.join(file).is_file())
+	}
 }
 
 pub const QWEN_CHOICES: &[QwenChoice] = &[
 	QwenChoice {
 		id: "qwen3-asr-0.6b",
-		repo: "andrewleech/qwen3-asr-0.6b-onnx",
-		revision: "4fc24a1402e74db89c4d2ef256875e71680128c4",
-		note: "0.6B int4 — faster",
-		approx_bytes: 2_031_529_199,
+		repo: "ggml-org/Qwen3-ASR-0.6B-GGUF",
+		revision: "928ab958557df9aa2ef1c93e0e83c7ad0933fae2",
+		model: "Qwen3-ASR-0.6B-Q8_0.gguf",
+		mmproj: "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
+		note: "0.6B Q8 — faster",
+		approx_bytes: 1_019_141_728,
 	},
 	QwenChoice {
 		id: "qwen3-asr-1.7b",
-		repo: "andrewleech/qwen3-asr-1.7b-onnx",
-		revision: "df916193ac67e59347769891a21e10d81d12acdd",
-		note: "1.7B int4 — more accurate",
-		approx_bytes: 4_131_035_498,
+		repo: "ggml-org/Qwen3-ASR-1.7B-GGUF",
+		revision: "36a678687ba7d07a74ca70ccb0e36902e005fb80",
+		model: "Qwen3-ASR-1.7B-Q8_0.gguf",
+		mmproj: "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
+		note: "1.7B Q8 — more accurate",
+		approx_bytes: 2_520_744_288,
 	},
-];
-
-/// The only non-LFS file of the set (no upstream content hash).
-pub const QWEN_CONFIG_FILE: &str = "config.json";
-
-/// Files of the int4 variant; an entry counts as installed when all exist.
-pub const QWEN_FILES: &[&str] = &[
-	QWEN_CONFIG_FILE,
-	"tokenizer.json",
-	"decoder_init.int4.onnx",
-	"decoder_step.int4.onnx",
-	"embed_tokens.bin",
-	"encoder.int4.onnx",
-	"decoder_weights.int4.data",
 ];
 
 /// Qwen3-ASR models live in their own subdir of the models dir.
@@ -409,25 +413,26 @@ pub fn qwen_dir() -> PathBuf {
 	app_id::models_dir().join("qwen")
 }
 
-fn qwen_installed(dir: &std::path::Path) -> bool {
-	QWEN_FILES.iter().all(|file| dir.join(file).is_file())
-}
-
 /// Resolves the Qwen3-ASR model dir: the chosen id when installed, else the
 /// most recently downloaded entry, else None (engine not available).
 pub fn resolve_qwen(model_id: Option<&str>) -> Option<PathBuf> {
-	let installed = |choice: &&QwenChoice| qwen_installed(&qwen_dir().join(choice.id));
 	QWEN_CHOICES
 		.iter()
 		.filter(|c| Some(c.id) == model_id)
-		.find(installed)
+		.find(|c| c.installed())
 		.or_else(|| {
-			QWEN_CHOICES.iter().filter(installed).max_by_key(|c| {
-				let last_file = qwen_dir().join(c.id).join(QWEN_FILES[QWEN_FILES.len() - 1]);
-				last_file.metadata().ok().and_then(|m| m.modified().ok())
+			QWEN_CHOICES.iter().filter(|c| c.installed()).max_by_key(|c| {
+				let model = qwen_dir().join(c.id).join(c.model);
+				model.metadata().ok().and_then(|m| m.modified().ok())
 			})
 		})
 		.map(|c| qwen_dir().join(c.id))
+}
+
+/// The (model, mmproj) files of the catalog entry stored in `dir`.
+pub fn qwen_files(dir: &std::path::Path) -> Option<(PathBuf, PathBuf)> {
+	let choice = QWEN_CHOICES.iter().find(|c| dir.file_name().is_some_and(|name| name == c.id))?;
+	Some((dir.join(choice.model), dir.join(choice.mmproj)))
 }
 
 #[tauri::command]
@@ -437,9 +442,10 @@ pub fn list_qwen_models(qwen_model_id: Option<String>) -> Vec<GigaamModelInfo> {
 		.iter()
 		.map(|choice| {
 			let dir = qwen_dir().join(choice.id);
-			let installed = qwen_installed(&dir);
+			let installed = choice.installed();
 			let size_bytes = installed.then(|| {
-				QWEN_FILES
+				choice
+					.files()
 					.iter()
 					.filter_map(|file| std::fs::metadata(dir.join(file)).ok())
 					.map(|m| m.len())
@@ -466,12 +472,15 @@ pub async fn download_qwen_model(app: tauri::AppHandle, model_id: String) -> Res
 		.ok_or_else(|| format!("unknown qwen model: {model_id}"))?;
 	let dir = qwen_dir().join(choice.id);
 	std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-	// A re-download replaces files under loaded sessions: drop the engine.
+	// A re-download replaces files under the running server: stop it.
 	crate::pipeline::unload_qwen(&app);
+	// The engine's runtime is small next to any model: fetch silently when
+	// missing.
+	ensure_llama_runtime().await?;
 	let mut offset = 0;
-	for (i, file) in QWEN_FILES.iter().enumerate() {
+	for (i, file) in choice.files().iter().enumerate() {
 		let url = format!("https://huggingface.co/{}/resolve/{}/{file}", choice.repo, choice.revision);
-		let last = i + 1 == QWEN_FILES.len();
+		let last = i + 1 == choice.files().len();
 		offset +=
 			download_span(&app, choice.id, &url, &dir, file, offset, Some(choice.approx_bytes), last)
 				.await?;
@@ -480,8 +489,7 @@ pub async fn download_qwen_model(app: tauri::AppHandle, model_id: String) -> Res
 }
 
 /// Removes a downloaded Qwen3-ASR model dir and drops the cached engine so
-/// deleted weights leave memory. Managed dirs only: names come from
-/// QWEN_CHOICES.
+/// its server exits. Managed dirs only: names come from QWEN_CHOICES.
 #[tauri::command]
 pub fn delete_qwen_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
 	let choice = QWEN_CHOICES
@@ -494,6 +502,57 @@ pub fn delete_qwen_model(app: tauri::AppHandle, model_id: String) -> Result<(), 
 	}
 	crate::pipeline::unload_qwen(&app);
 	Ok(())
+}
+
+// --- llama.cpp runtime (runs Qwen3-ASR; see DESIGN.md "Engines") ---
+
+/// Pinned llama.cpp release: its prebuilt Vulkan build is unpacked under
+/// the data dir and run as `llama-server` (see qwen.rs).
+const LLAMA_BUILD: &str = "b11381";
+
+/// sha256 of that release's `bin-ubuntu-vulkan-x64` archive.
+const LLAMA_ARCHIVE_SHA256: &str =
+	"6f93bf4138e9ad6a380ff605be1fd5108a66ec1977218eb74613f90634e18c64";
+
+fn llama_dir() -> PathBuf {
+	app_id::data_dir().join("llama")
+}
+
+/// The installed `llama-server` of the pinned build, if any.
+pub fn llama_server() -> Option<PathBuf> {
+	let path = llama_dir().join(format!("llama-{LLAMA_BUILD}")).join("llama-server");
+	path.is_file().then_some(path)
+}
+
+/// Downloads and unpacks the pinned llama.cpp build unless it is already
+/// installed. The archive holds one `llama-{build}` directory.
+pub async fn ensure_llama_runtime() -> Result<PathBuf, String> {
+	if let Some(path) = llama_server() {
+		return Ok(path);
+	}
+	let dir = llama_dir();
+	std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+	let archive = dir.join(format!("llama-{LLAMA_BUILD}.tar.gz"));
+	let url = format!(
+		"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/llama-{LLAMA_BUILD}-bin-ubuntu-vulkan-x64.tar.gz"
+	);
+	download_file(&url, &archive).await?;
+	let unpacked = sha256_file(&archive).and_then(|hash| {
+		if hash != LLAMA_ARCHIVE_SHA256 {
+			return Err(format!("llama.cpp archive has an unexpected sha256: {hash}"));
+		}
+		let status = std::process::Command::new("tar")
+			.arg("-xzf")
+			.arg(&archive)
+			.arg("-C")
+			.arg(&dir)
+			.status()
+			.map_err(|e| format!("tar: {e}"))?;
+		status.success().then_some(()).ok_or_else(|| format!("tar failed: {status}"))
+	});
+	let _ = std::fs::remove_file(&archive);
+	unpacked?;
+	llama_server().ok_or_else(|| "llama.cpp archive holds no llama-server".to_string())
 }
 
 /// Removes a downloaded model file (and its stale partial download, if any)
@@ -629,11 +688,11 @@ pub async fn check_model_updates() -> Result<Vec<UpdateStatus>, String> {
 			jobs.push((choice.id, choice.file, path, gigaam.get(choice.file).cloned()));
 		}
 	}
-	// One job per hashed file of an installed Qwen3-ASR entry, all under the
+	// One job per file of an installed Qwen3-ASR entry, all under the
 	// entry's id; their verdicts are merged below.
 	for choice in QWEN_CHOICES {
 		let dir = qwen_dir().join(choice.id);
-		if !qwen_installed(&dir) {
+		if !choice.installed() {
 			continue;
 		}
 		let tree = format!(
@@ -641,7 +700,7 @@ pub async fn check_model_updates() -> Result<Vec<UpdateStatus>, String> {
 			choice.repo, choice.revision
 		);
 		let upstream = fetch_upstream_hashes(&tree).await?;
-		for &file in QWEN_FILES.iter().filter(|&&file| file != QWEN_CONFIG_FILE) {
+		for file in choice.files() {
 			jobs.push((choice.id, choice.id, dir.join(file), upstream.get(file).cloned()));
 		}
 	}

@@ -20,7 +20,7 @@ Wayland. Stack: Rust, Tauri 2, whisper.cpp (whisper-rs), Svelte 5 + Vite, Nord.
 |----------|--------|-------|
 | Hotkey   | xdg-desktop-portal GlobalShortcuts via `ashpd` (feature `global_shortcuts`) | Plasma 6 native binding dialog; press-to-toggle |
 | Capture  | `cpal` in-process, default input device | resample to 16 kHz mono f32; risk: pipewire-alsa default routing — smoke test early |
-| ASR      | whisper (`whisper-rs`) + GigaAM and Qwen3-ASR (`ort`/ONNX Runtime, see "Engines") | whisper: features `cuda` + `vulkan` both enabled; runtime device pick via `WhisperContextParameters::gpu_device` (verified: whisper.cpp enumerates all registered GPU backends, whisper-rs passes the field through). GigaAM, Qwen3-ASR: CPU EP only |
+| ASR      | whisper (`whisper-rs`) + GigaAM (`ort`/ONNX Runtime) + Qwen3-ASR (`llama-server` child process), see "Engines" | whisper: features `cuda` + `vulkan` both enabled; runtime device pick via `WhisperContextParameters::gpu_device` (verified: whisper.cpp enumerates all registered GPU backends, whisper-rs passes the field through). GigaAM: CPU EP only. Qwen3-ASR: Vulkan |
 | Paste    | clipboard + simulated Ctrl+V (`wl-copy`/`wl-paste` + `ydotool`), restore previous clipboard | works everywhere Ctrl+V works |
 | History  | SQLite (`rusqlite`, bundled), text + language + timestamp, kept forever | audio not stored |
 
@@ -43,34 +43,36 @@ Three ASR engines behind one seam (`asr::Transcriber`):
   the onnx-asr wheel, MIT) run as-is via `ort`; CTC greedy decode
   (argmax per 40 ms frame, drop blank, collapse repeats; verified
   byte-identical to `onnx_asr.recognize` on the official sample).
-- Long recordings: split with Silero VAD (`vad.rs`; vendored, MIT) into
-  speech islands. GigaAM (segment limit ~25 s): each island separately,
-  capped at 20 s. Qwen3-ASR: islands joined into pieces of up to 30 s, the
-  language detected on the first piece forced on the rest. Whisper path
-  unchanged (no length limit).
-- Qwen3-ASR model: int4 ONNX exports of the 0.6B and 1.7B models from HF
-  `andrewleech/qwen3-asr-{0.6b,1.7b}-onnx`, revisions pinned in code
+- Long recordings (GigaAM path only; its segment limit is ~25 s): split
+  with Silero VAD (`vad.rs`; vendored, MIT) into speech islands, each
+  capped at 20 s. Whisper and Qwen3-ASR take a recording whole.
+- Qwen3-ASR model: Q8_0 GGUF of the 0.6B and 1.7B models from HF
+  `ggml-org/Qwen3-ASR-{0.6B,1.7B}-GGUF`, revisions pinned in code
   (`models::QWEN_CHOICES`). One directory per entry under
-  `~/.local/share/wtf/models/qwen/` (encoder, two decoder graphs sharing
-  one weights file, fp16 embedding table, tokenizer, config).
-- Qwen3-ASR internals (`qwen.rs`): Whisper-style log-mel (128 bins)
-  computed in Rust (`rustfft`); encoder -> decoder prefill -> greedy
-  token loop with KV cache. The model answers
+  `~/.local/share/wtf/models/qwen/` (language model + audio encoder
+  "mmproj").
+- Qwen3-ASR runtime: llama.cpp cannot be linked in next to whisper.cpp
+  (each carries its own ggml), so the model runs in a `llama-server` child
+  process. The app downloads the pinned release's prebuilt Vulkan build
+  (`models::LLAMA_BUILD`, sha256-checked, unpacked with `tar`) into
+  `~/.local/share/wtf/llama/` together with the first model.
+- Qwen3-ASR internals (`qwen.rs`): the server starts on the first
+  dictation — loopback port, per-process API key, one slot, all layers on
+  the GPU — and stops when the engine is dropped (`unload_model`, model
+  change); the systemd unit's cgroup covers an app crash. A recording is
+  one chat request with a base64 WAV. The model answers
   `language <Name><asr_text><transcript>`; a chosen language pre-fills
-  that prefix. Verified token-identical to a librosa + onnxruntime
-  pipeline on the official GigaAM sample. Tokenizer: decode only, straight
-  from `tokenizer.json` (no `tokenizers` crate).
-- Qwen3-ASR limits, measured on the official GigaAM samples: with 0.6B
-  Auto can fail on Russian (the model paraphrased the 11 s sample in
-  English with no language tag — reported as an error, the fix is picking
-  the language; 1.7B detected Russian on the same sample). Decoding cost
-  grows faster than length (0.6B: 71 s in one piece -> 41 s, in 30 s
-  pieces -> 20 s; 1.7B in pieces -> 31 s).
+  that prefix as the start of the assistant turn.
+- Qwen3-ASR measurements (RX 9070 XT, official GigaAM samples): 11 s of
+  Russian in 0.33 s (0.6B) / 0.57 s (1.7B), 71 s in 1.6 s / 2.7 s, model
+  load ~1 s. Digital silence makes it hallucinate (Chinese text); the
+  pipeline's silence guard runs before the engine. An earlier int4 ONNX
+  build on the CPU (`ort`) was 8-13x slower and less accurate on Russian,
+  and was replaced.
 - All engines stay cached in app state once loaded (no eviction on
   engine switch); `unload_model` drops everything.
 - Prompts: GigaAM and Qwen3-ASR ignore `initial_prompt`; the Prompts tab
   carries a static banner saying prompts apply to whisper only.
-- CPU only for Qwen3-ASR as well (same `ort` build).
 - CPU only for GigaAM — final: GPU rejected (CPU latency already sits
   below the dictation perceptibility threshold; a GPU session would only
   add resident VRAM and an `ort` `rocm`/`webgpu` build). `ort` is pinned

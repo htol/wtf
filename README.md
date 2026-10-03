@@ -23,15 +23,19 @@ The engine is picked in Settings, General. Whisper handles auto-detect and
 all languages. GigaAM v3 (`ort`/ONNX Runtime, CPU) is Russian only; its model
 files live in `~/.local/share/wtf/models/gigaam/`, and the mel preprocessor
 and Silero VAD graphs are vendored in `src-tauri/assets/` (MIT). Qwen3-ASR
-(0.6B or 1.7B, int4 ONNX, CPU) is multilingual with language detection; its
-model files live in `~/.local/share/wtf/models/qwen/`. The first build
-downloads a prebuilt libonnxruntime (cargo feature `download-binaries` of
-`ort`).
+(0.6B or 1.7B, Q8 GGUF) is multilingual with language detection and runs on
+the GPU in a `llama-server` child process; its model files live in
+`~/.local/share/wtf/models/qwen/`, and the app downloads a pinned llama.cpp
+Vulkan build into `~/.local/share/wtf/llama/` with the first model. The
+first build downloads a prebuilt libonnxruntime (cargo feature
+`download-binaries` of `ort`).
 
 ## Runtime dependencies
 
 - `wl-copy`, `wl-paste` (clipboard injection)
 - `ydotool` + running `ydotoold` (simulated Ctrl+V)
+- `tar` and a Vulkan driver (Qwen3-ASR engine: unpacking and running the
+  llama.cpp build)
 - xdg-desktop-portal (GlobalShortcuts, notifications) — stock KDE Plasma 6
   (Hyprland: see "Wayland notes, Hyprland"; `xdg-desktop-portal-hyprland`).
   The systemd unit is named `app-wtf.service` and `wtf.desktop` is installed:

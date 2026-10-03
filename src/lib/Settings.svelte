@@ -558,8 +558,8 @@
 			{:else if subTab === 'qwen'}
 				<section>
 					<p class="hint">
-						Multilingual with language detection, CPU-only. Prompts are not
-						supported.
+						Multilingual with language detection; runs on the GPU via llama.cpp
+						(Vulkan), downloaded with the first model. Prompts are not supported.
 					</p>
 					{@render modelCards('qwen')}
 				</section>
