@@ -3,8 +3,9 @@
 //!
 //! Default recommendation: ggml-large-v3-turbo q5_0 from
 //! https://huggingface.co/ggerganov/whisper.cpp
-//! (multilingual models, see DESIGN.md "Models"). The GigaAM engine has its
-//! own catalog and storage subdir (DESIGN.md, "Engines").
+//! (multilingual models, see DESIGN.md "Models"). The GigaAM and Qwen3-ASR
+//! engines have their own catalogs and storage subdirs (DESIGN.md,
+//! "Engines").
 
 use std::path::PathBuf;
 
@@ -123,6 +124,24 @@ async fn download_with_progress(
 	dir: &std::path::Path,
 	file: &str,
 ) -> Result<(), String> {
+	download_span(app, id, url, dir, file, 0, None, true).await.map(|_| ())
+}
+
+/// One file of a download reported under `id`. `offset` is what earlier
+/// files of the same download already fetched and `total` the size of the
+/// whole set (None = this file's own length); `last` marks the file whose
+/// completion finishes the download. Returns the bytes fetched.
+#[allow(clippy::too_many_arguments)]
+async fn download_span(
+	app: &tauri::AppHandle,
+	id: &'static str,
+	url: &str,
+	dir: &std::path::Path,
+	file: &str,
+	offset: u64,
+	total: Option<u64>,
+	last: bool,
+) -> Result<u64, String> {
 	let final_path = dir.join(file);
 	let part_path = dir.join(format!("{file}.part"));
 
@@ -131,14 +150,14 @@ async fn download_with_progress(
 		.map_err(|e| format!("download request failed: {e}"))?
 		.error_for_status()
 		.map_err(|e| format!("huggingface returned an error: {e}"))?;
-	let total = response.content_length();
+	let total = total.or(response.content_length());
 
 	let emit = |downloaded: u64, done: bool| {
 		let _ = app.emit(
 			"model-download",
 			DownloadProgress {
 				id,
-				downloaded,
+				downloaded: offset + downloaded,
 				total,
 				done,
 			},
@@ -168,8 +187,10 @@ async fn download_with_progress(
 	drop(part);
 	std::fs::rename(&part_path, &final_path)
 		.map_err(|e| format!("cannot finalize download: {e}"))?;
-	emit(downloaded, true);
-	Ok(())
+	if last {
+		emit(downloaded, true);
+	}
+	Ok(downloaded)
 }
 
 // --- GigaAM (Russian engine; see DESIGN.md "Engines") ---
@@ -336,6 +357,145 @@ pub fn delete_gigaam_model(app: tauri::AppHandle, model_id: String) -> Result<()
 	Ok(())
 }
 
+// --- Qwen3-ASR (multilingual engine; see DESIGN.md "Engines") ---
+
+/// A Qwen3-ASR catalog entry: one HF repo at a pinned revision, stored in
+/// its own subdir (named by `id`) of `qwen_dir()`.
+pub struct QwenChoice {
+	pub id: &'static str,
+	/// `{owner}/{repo}` on huggingface.
+	repo: &'static str,
+	revision: &'static str,
+	/// One-line UI description.
+	pub note: &'static str,
+	/// Download size of `QWEN_FILES` on huggingface (shown before install,
+	/// and the progress total).
+	pub approx_bytes: u64,
+}
+
+pub const QWEN_CHOICES: &[QwenChoice] = &[
+	QwenChoice {
+		id: "qwen3-asr-0.6b",
+		repo: "andrewleech/qwen3-asr-0.6b-onnx",
+		revision: "4fc24a1402e74db89c4d2ef256875e71680128c4",
+		note: "0.6B int4 — faster",
+		approx_bytes: 2_031_529_199,
+	},
+	QwenChoice {
+		id: "qwen3-asr-1.7b",
+		repo: "andrewleech/qwen3-asr-1.7b-onnx",
+		revision: "df916193ac67e59347769891a21e10d81d12acdd",
+		note: "1.7B int4 — more accurate",
+		approx_bytes: 4_131_035_498,
+	},
+];
+
+/// The only non-LFS file of the set (no upstream content hash).
+pub const QWEN_CONFIG_FILE: &str = "config.json";
+
+/// Files of the int4 variant; an entry counts as installed when all exist.
+pub const QWEN_FILES: &[&str] = &[
+	QWEN_CONFIG_FILE,
+	"tokenizer.json",
+	"decoder_init.int4.onnx",
+	"decoder_step.int4.onnx",
+	"embed_tokens.bin",
+	"encoder.int4.onnx",
+	"decoder_weights.int4.data",
+];
+
+/// Qwen3-ASR models live in their own subdir of the models dir.
+pub fn qwen_dir() -> PathBuf {
+	app_id::models_dir().join("qwen")
+}
+
+fn qwen_installed(dir: &std::path::Path) -> bool {
+	QWEN_FILES.iter().all(|file| dir.join(file).is_file())
+}
+
+/// Resolves the Qwen3-ASR model dir: the chosen id when installed, else the
+/// most recently downloaded entry, else None (engine not available).
+pub fn resolve_qwen(model_id: Option<&str>) -> Option<PathBuf> {
+	let installed = |choice: &&QwenChoice| qwen_installed(&qwen_dir().join(choice.id));
+	QWEN_CHOICES
+		.iter()
+		.filter(|c| Some(c.id) == model_id)
+		.find(installed)
+		.or_else(|| {
+			QWEN_CHOICES.iter().filter(installed).max_by_key(|c| {
+				let last_file = qwen_dir().join(c.id).join(QWEN_FILES[QWEN_FILES.len() - 1]);
+				last_file.metadata().ok().and_then(|m| m.modified().ok())
+			})
+		})
+		.map(|c| qwen_dir().join(c.id))
+}
+
+#[tauri::command]
+pub fn list_qwen_models(qwen_model_id: Option<String>) -> Vec<GigaamModelInfo> {
+	let active = resolve_qwen(qwen_model_id.as_deref());
+	QWEN_CHOICES
+		.iter()
+		.map(|choice| {
+			let dir = qwen_dir().join(choice.id);
+			let installed = qwen_installed(&dir);
+			let size_bytes = installed.then(|| {
+				QWEN_FILES
+					.iter()
+					.filter_map(|file| std::fs::metadata(dir.join(file)).ok())
+					.map(|m| m.len())
+					.sum()
+			});
+			GigaamModelInfo {
+				id: choice.id,
+				file: choice.id,
+				note: choice.note,
+				installed,
+				size_bytes,
+				approx_bytes: choice.approx_bytes,
+				active: active.as_deref() == Some(dir.as_path()),
+			}
+		})
+		.collect()
+}
+
+#[tauri::command]
+pub async fn download_qwen_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+	let choice = QWEN_CHOICES
+		.iter()
+		.find(|c| c.id == model_id)
+		.ok_or_else(|| format!("unknown qwen model: {model_id}"))?;
+	let dir = qwen_dir().join(choice.id);
+	std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+	// A re-download replaces files under loaded sessions: drop the engine.
+	crate::pipeline::unload_qwen(&app);
+	let mut offset = 0;
+	for (i, file) in QWEN_FILES.iter().enumerate() {
+		let url = format!("https://huggingface.co/{}/resolve/{}/{file}", choice.repo, choice.revision);
+		let last = i + 1 == QWEN_FILES.len();
+		offset +=
+			download_span(&app, choice.id, &url, &dir, file, offset, Some(choice.approx_bytes), last)
+				.await?;
+	}
+	Ok(())
+}
+
+/// Removes a downloaded Qwen3-ASR model dir and drops the cached engine so
+/// deleted weights leave memory. Managed dirs only: names come from
+/// QWEN_CHOICES.
+#[tauri::command]
+pub fn delete_qwen_model(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+	let choice = QWEN_CHOICES
+		.iter()
+		.find(|c| c.id == model_id)
+		.ok_or_else(|| format!("unknown qwen model: {model_id}"))?;
+	let dir = qwen_dir().join(choice.id);
+	if dir.is_dir() {
+		std::fs::remove_dir_all(&dir).map_err(|e| format!("cannot delete {}: {e}", dir.display()))?;
+	}
+	crate::pipeline::unload_qwen(&app);
+	Ok(())
+}
+
 /// Removes a downloaded model file (and its stale partial download, if any)
 /// from the models dir. Managed files only: paths come from MODEL_CHOICES.
 #[tauri::command]
@@ -448,9 +608,9 @@ pub struct UpdateStatus {
 
 /// Compares every installed catalog model with huggingface: the tree API
 /// supplies the upstream sha256 (`lfs.oid`), the local file is hashed with
-/// sha256. Whisper is checked against `main`, GigaAM against its pinned
-/// revision. Hashing multi-GB files takes seconds, so it runs on a blocking
-/// thread.
+/// sha256. Whisper is checked against `main`, GigaAM and Qwen3-ASR against
+/// their pinned revisions. Hashing multi-GB files takes seconds, so it runs
+/// on a blocking thread.
 #[tauri::command]
 pub async fn check_model_updates() -> Result<Vec<UpdateStatus>, String> {
 	let whisper = fetch_upstream_hashes(HF_TREE).await?;
@@ -469,17 +629,33 @@ pub async fn check_model_updates() -> Result<Vec<UpdateStatus>, String> {
 			jobs.push((choice.id, choice.file, path, gigaam.get(choice.file).cloned()));
 		}
 	}
+	// One job per hashed file of an installed Qwen3-ASR entry, all under the
+	// entry's id; their verdicts are merged below.
+	for choice in QWEN_CHOICES {
+		let dir = qwen_dir().join(choice.id);
+		if !qwen_installed(&dir) {
+			continue;
+		}
+		let tree = format!(
+			"https://huggingface.co/api/models/{}/tree/{}",
+			choice.repo, choice.revision
+		);
+		let upstream = fetch_upstream_hashes(&tree).await?;
+		for &file in QWEN_FILES.iter().filter(|&&file| file != QWEN_CONFIG_FILE) {
+			jobs.push((choice.id, choice.id, dir.join(file), upstream.get(file).cloned()));
+		}
+	}
 	tauri::async_runtime::spawn_blocking(move || {
-		jobs.into_iter()
-			.map(|(id, file, path, upstream)| {
-				let local = sha256_file(&path)?;
-				Ok(UpdateStatus {
-					id,
-					file,
-					up_to_date: upstream.as_deref() == Some(local.as_str()),
-				})
-			})
-			.collect()
+		let mut statuses: Vec<UpdateStatus> = Vec::new();
+		for (id, file, path, upstream) in jobs {
+			let local = sha256_file(&path)?;
+			let up_to_date = upstream.as_deref() == Some(local.as_str());
+			match statuses.last_mut().filter(|s| s.id == id) {
+				Some(status) => status.up_to_date &= up_to_date,
+				None => statuses.push(UpdateStatus { id, file, up_to_date }),
+			}
+		}
+		Ok(statuses)
 	})
 	.await
 	.map_err(|e| format!("update check failed: {e}"))?

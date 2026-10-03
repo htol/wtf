@@ -47,6 +47,9 @@ ash = { version = "0.38.0", features = ["loaded"], optional = true }
 # would silently pull 2.0.0 finals with a different API. Default features
 # include `download-binaries` (prebuilt libonnxruntime fetched at build time).
 ort = "=2.0.0-rc.13"
+# Qwen3-ASR engine: STFT for its log-mel front end (the model files carry no
+# preprocessor graph, unlike GigaAM's).
+rustfft = "6"
 
 [profile.release]
 strip = true

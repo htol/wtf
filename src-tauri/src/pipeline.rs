@@ -1,14 +1,14 @@
 //! Dictation pipeline: `record` hotkey toggle -> capture -> transcribe ->
 //! paste into the focused app -> history (DESIGN.md "Pipeline").
 //!
-//! Engine routing (DESIGN.md, "Engines"): language `ru` -> GigaAM when its
-//! model is downloaded; `auto`, `en` and `ru-whisper` (Russian pinned to
-//! whisper) -> whisper. `ru` without the GigaAM model falls back to whisper
-//! with a one-time download suggestion.
+//! Engine routing (DESIGN.md, "Engines") follows the `engine` setting.
+//! GigaAM is Russian only and ignores the language; without its model it
+//! falls back to whisper with a one-time download suggestion. Qwen3-ASR
+//! without a model fails like whisper does (settings window opens).
 //!
 //! `Dictation` is app-managed state. Engines are created lazily on the first
 //! transcription and cached, each slot keyed by model path (loading is
-//! expensive); both stay loaded across language switches.
+//! expensive); all stay loaded across engine switches.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +24,8 @@ pub struct Dictation {
 	whisper: Mutex<Option<(PathBuf, asr::Transcriber)>>,
 	/// GigaAM slot: Transcriber::GigaAm, keyed by onnx model path.
 	gigaam: Mutex<Option<(PathBuf, asr::Transcriber)>>,
+	/// Qwen3-ASR slot: Transcriber::Qwen, keyed by model dir.
+	qwen: Mutex<Option<(PathBuf, asr::Transcriber)>>,
 	/// Guard for the one-time-per-session GigaAM download suggestion.
 	gigaam_suggested: AtomicBool,
 }
@@ -34,6 +36,7 @@ impl Dictation {
 			recorder: Mutex::new(None),
 			whisper: Mutex::new(None),
 			gigaam: Mutex::new(None),
+			qwen: Mutex::new(None),
 			gigaam_suggested: AtomicBool::new(false),
 		}
 	}
@@ -146,13 +149,8 @@ fn spawn_level_ticker(app: tauri::AppHandle) {
 
 fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), String> {
 	let settings = settings::load();
-	// Two Russian rows in the selector: `ru` prefers GigaAM, `ru-whisper`
-	// pins Russian to whisper; both force the language code so the whisper
-	// fallback/fixed path transcribes Russian.
-	let use_gigaam = settings.language == "ru";
 	let language = match settings.language.as_str() {
 		"auto" => None,
-		"ru-whisper" => Some("ru"),
 		code => Some(code),
 	};
 	let prompt = settings
@@ -160,23 +158,31 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 		.as_ref()
 		.and_then(|name| settings.prompts.iter().find(|p| &p.name == name))
 		.map(|p| p.text.as_str());
-	let (text, lang) = if use_gigaam {
-		match models::resolve_gigaam(settings.gigaam_model_id.as_deref()) {
-			Some(model) => (
-				transcribe_gigaam_cached(app, &model, samples)?,
-				"ru".to_string(),
-			),
-			None => {
-				// No GigaAM model: whisper handles Russian, and the user gets
-				// one nudge per session towards the better engine.
-				suggest_gigaam_download(app);
-				let model = require_whisper_model(app)?;
-				transcribe_whisper_cached(app, &model, samples, Some("ru"), prompt)?
+	let (text, lang) = match settings.engine {
+		settings::Engine::Gigaam => {
+			match models::resolve_gigaam(settings.gigaam_model_id.as_deref()) {
+				Some(model) => (
+					transcribe_gigaam_cached(app, &model, samples)?,
+					"ru".to_string(),
+				),
+				None => {
+					// No GigaAM model: whisper handles Russian, and the user gets
+					// one nudge per session towards the better engine.
+					suggest_gigaam_download(app);
+					let model = require_whisper_model(app)?;
+					transcribe_whisper_cached(app, &model, samples, Some("ru"), prompt)?
+				}
 			}
 		}
-	} else {
-		let model = require_whisper_model(app)?;
-		transcribe_whisper_cached(app, &model, samples, language, prompt)?
+		settings::Engine::Qwen => {
+			let model = models::resolve_qwen(settings.qwen_model_id.as_deref())
+				.ok_or_else(|| no_model(app, "no Qwen3-ASR model available: download one in settings"))?;
+			transcribe_qwen_cached(app, &model, samples, language)?
+		}
+		settings::Engine::Whisper => {
+			let model = require_whisper_model(app)?;
+			transcribe_whisper_cached(app, &model, samples, language, prompt)?
+		}
 	};
 	// History is written before pasting: a paste failure must not lose the
 	// transcript. Its error is deferred so a history failure does not block
@@ -195,14 +201,19 @@ fn transcribe_and_paste(app: &tauri::AppHandle, samples: &[f32]) -> Result<(), S
 /// picker instead of failing silently (first run).
 fn require_whisper_model(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 	let settings = settings::load();
-	models::resolve(settings.model_path.as_deref(), settings.model_id.as_deref()).ok_or_else(|| {
-		if let Some(window) = app.get_webview_window("main") {
-			let _ = window.show();
-			let _ = window.set_focus();
-		}
-		let _ = app.emit("no-model", ());
-		"no model available: download one in settings".to_string()
-	})
+	models::resolve(settings.model_path.as_deref(), settings.model_id.as_deref())
+		.ok_or_else(|| no_model(app, "no model available: download one in settings"))
+}
+
+/// Surfaces the settings window for a missing model and returns `message`
+/// as the pipeline error.
+fn no_model(app: &tauri::AppHandle, message: &str) -> String {
+	if let Some(window) = app.get_webview_window("main") {
+		let _ = window.show();
+		let _ = window.set_focus();
+	}
+	let _ = app.emit("no-model", ());
+	message.to_string()
 }
 
 /// One-time-per-session desktop notification: Russian dictation could use
@@ -225,14 +236,24 @@ fn suggest_gigaam_download(app: &tauri::AppHandle) {
 	});
 }
 
-/// Drops both cached engines: model weights and whisper state are freed
+/// Drops all cached engines: model weights and whisper state are freed
 /// (GPU VRAM + host memory); the next dictation reloads lazily.
 pub fn unload_transcriber(app: &tauri::AppHandle) {
 	let state = app.state::<Dictation>();
 	let whisper = state.whisper.lock().unwrap().take().is_some();
 	let gigaam = state.gigaam.lock().unwrap().take().is_some();
-	if whisper || gigaam {
+	let qwen = state.qwen.lock().unwrap().take().is_some();
+	if whisper || gigaam || qwen {
 		eprintln!("models unloaded");
+	}
+}
+
+/// Drops only the cached Qwen3-ASR engine (its model files changed or were
+/// deleted).
+pub fn unload_qwen(app: &tauri::AppHandle) {
+	let state = app.state::<Dictation>();
+	if state.qwen.lock().unwrap().take().is_some() {
+		eprintln!("qwen model unloaded");
 	}
 }
 
@@ -298,4 +319,26 @@ fn transcribe_gigaam_cached(
 		.1
 		.transcribe(samples, Some("ru"), None)?;
 	Ok(text)
+}
+
+fn transcribe_qwen_cached(
+	app: &tauri::AppHandle,
+	model: &std::path::Path,
+	samples: &[f32],
+	language: Option<&str>,
+) -> Result<(String, String), String> {
+	let state = app.state::<Dictation>();
+	let mut cached = state.qwen.lock().unwrap();
+	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
+		eprintln!("loading qwen model {}...", model.display());
+		*cached = Some((
+			model.to_path_buf(),
+			asr::Transcriber::Qwen(crate::qwen::Qwen::new(model)?),
+		));
+	}
+	cached
+		.as_mut()
+		.expect("transcriber was just stored")
+		.1
+		.transcribe(samples, language, None)
 }

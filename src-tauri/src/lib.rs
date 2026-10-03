@@ -13,6 +13,7 @@ mod hotkey;
 mod inject;
 mod models;
 mod pipeline;
+mod qwen;
 mod settings;
 mod tray;
 mod vad;
@@ -107,6 +108,9 @@ pub fn run() {
 			models::list_gigaam_models,
 			models::download_gigaam_model,
 			models::delete_gigaam_model,
+			models::list_qwen_models,
+			models::download_qwen_model,
+			models::delete_qwen_model,
 			models::check_model_updates,
 			inject::copy_to_clipboard,
 			asr::list_gpu_devices,

@@ -1,6 +1,7 @@
-//! Transcription seam: whisper (`whisper-rs`) and GigaAM (`gigaam`), two
-//! engines behind one enum. The pipeline routes by language (see
-//! pipeline.rs); both engines are cached in app state once loaded.
+//! Transcription seam: whisper (`whisper-rs`), GigaAM (`gigaam`) and
+//! Qwen3-ASR (`qwen`), three engines behind one enum. The pipeline routes by
+//! the engine setting (see pipeline.rs); engines are cached in app state
+//! once loaded.
 
 /// A GPU visible to the ASR backend. `index` is the backend's device ordinal
 /// that whisper's `gpu_device` setting expects (Vulkan physical-device order
@@ -113,12 +114,13 @@ mod tests {
 	}
 }
 
-/// The active ASR engine. Both variants are cached by the pipeline keyed
+/// The active ASR engine. Every variant is cached by the pipeline keyed
 /// by model path (loading is expensive); `transcribe` is the common seam.
 pub enum Transcriber {
 	#[cfg(feature = "asr")]
 	Whisper(WhisperTranscriber),
 	GigaAm(crate::gigaam::GigaAm),
+	Qwen(crate::qwen::Qwen),
 }
 
 impl Transcriber {
@@ -134,7 +136,7 @@ impl Transcriber {
 
 	/// `samples`: 16 kHz mono f32. `language`: language code, "auto", or
 	/// None. `initial_prompt`: whisper-only decoder conditioning text
-	/// (GigaAM has no prompt input; it is ignored on that path). Returns the
+	/// (ignored by GigaAM and Qwen3-ASR). Returns the
 	/// transcript and the effective language code (forced or detected).
 	pub fn transcribe(
 		&mut self,
@@ -147,6 +149,13 @@ impl Transcriber {
 			Self::Whisper(whisper) => whisper.transcribe(samples, language, initial_prompt),
 			// The GigaAM path is Russian by construction (pipeline routing).
 			Self::GigaAm(gigaam) => Ok((gigaam.transcribe(samples)?, "ru".into())),
+			Self::Qwen(qwen) => qwen.transcribe(
+				samples,
+				match language {
+					None | Some("auto") => None,
+					some => some,
+				},
+			),
 		}
 	}
 }

@@ -5,12 +5,14 @@
 	import { releaseSaveBar, saveBar } from './saveState';
 
 	interface Settings {
+		engine: Engine;
 		language: string;
 		gpu_device: number;
 		use_gpu: boolean;
 		model_path: string | null;
 		model_id: string | null;
 		gigaam_model_id: string | null;
+		qwen_model_id: string | null;
 		silence_peak: number;
 		overlay_x: number;
 		overlay_y: number;
@@ -31,7 +33,8 @@
 		pci_bus_id: string;
 	}
 
-	interface GigaamModelInfo {
+	// A catalog card of the GigaAM or Qwen3-ASR engine.
+	interface CardModelInfo {
 		id: string;
 		file: string;
 		note: string;
@@ -54,21 +57,29 @@
 		up_to_date: boolean;
 	}
 
-	// Two Russian rows double as the engine switch: `ru` prefers GigaAM,
-	// `ru-whisper` pins Russian to whisper (see pipeline.rs routing).
+	type Engine = 'whisper' | 'gigaam' | 'qwen';
+	// Engines with a card catalog; the value doubles as the infix of their
+	// tauri commands and settings field.
+	type CardEngine = 'gigaam' | 'qwen';
+
+	const ENGINES: Array<{ value: Engine; label: string }> = [
+		{ value: 'whisper', label: 'Whisper' },
+		{ value: 'gigaam', label: 'GigaAM' },
+		{ value: 'qwen', label: 'Qwen3-ASR' }
+	];
+
 	const LANGUAGES: Array<{ value: string; label: string }> = [
 		{ value: 'auto', label: 'Auto' },
 		{ value: 'en', label: 'EN' },
-		{ value: 'ru', label: 'RU (GigaAM)' },
-		{ value: 'ru-whisper', label: 'RU (Whisper)' }
+		{ value: 'ru', label: 'RU' }
 	];
 
-	type SubTab = 'general' | 'whisper' | 'gigaam' | 'shortcuts';
+	type SubTab = 'general' | 'whisper' | 'gigaam' | 'qwen' | 'shortcuts';
 
 	let subTab = $state<SubTab>('general');
 	let settings = $state<Settings | null>(null);
 	let models = $state<ModelInfo[]>([]);
-	let gigaamModels = $state<GigaamModelInfo[]>([]);
+	let cardModels = $state<Record<CardEngine, CardModelInfo[]>>({ gigaam: [], qwen: [] });
 	let gpus = $state<GpuDevice[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	// Snapshot of the persisted values this tab owns; divergence from the
@@ -86,12 +97,14 @@
 	function ownedValues(): string {
 		if (!settings) return '';
 		return JSON.stringify([
+			settings.engine,
 			settings.language,
 			settings.gpu_device,
 			settings.use_gpu,
 			settings.model_path,
 			settings.model_id,
 			settings.gigaam_model_id,
+			settings.qwen_model_id,
 			settings.silence_peak,
 			settings.start_hidden
 		]);
@@ -114,8 +127,11 @@
 			manualPath: settings?.model_path ?? null,
 			modelId: settings?.model_id ?? null
 		});
-		gigaamModels = await invoke<GigaamModelInfo[]>('list_gigaam_models', {
+		cardModels.gigaam = await invoke<CardModelInfo[]>('list_gigaam_models', {
 			gigaamModelId: settings?.gigaam_model_id ?? null
+		});
+		cardModels.qwen = await invoke<CardModelInfo[]>('list_qwen_models', {
+			qwenModelId: settings?.qwen_model_id ?? null
 		});
 	}
 
@@ -127,12 +143,14 @@
 	async function persistOwn() {
 		if (!settings) return;
 		const current = await invoke<Settings>('get_settings');
+		current.engine = settings.engine;
 		current.language = settings.language;
 		current.gpu_device = settings.gpu_device;
 		current.use_gpu = settings.use_gpu;
 		current.model_path = settings.model_path;
 		current.model_id = settings.model_id;
 		current.gigaam_model_id = settings.gigaam_model_id;
+		current.qwen_model_id = settings.qwen_model_id;
 		current.silence_peak = settings.silence_peak;
 		current.start_hidden = settings.start_hidden;
 		await invoke('set_settings', { settings: current });
@@ -174,14 +192,14 @@
 		await refreshModels();
 	}
 
-	function gigaamProgress(id: string) {
+	function cardProgress(id: string) {
 		return progress[id] && !progress[id].done ? progress[id] : null;
 	}
 
-	async function downloadGigaam(id: string) {
+	async function downloadCard(engine: CardEngine, id: string) {
 		progress[id] = { id, downloaded: 0, total: null, done: false };
 		try {
-			await invoke('download_gigaam_model', { modelId: id });
+			await invoke(`download_${engine}_model`, { modelId: id });
 			delete updates[id];
 		} catch (e) {
 			alert(`Download failed: ${e}`);
@@ -190,21 +208,21 @@
 		await refreshModels();
 	}
 
-	async function removeGigaam(id: string) {
-		const model = gigaamModels.find((m) => m.id === id);
+	async function removeCard(engine: CardEngine, id: string) {
+		const model = cardModels[engine].find((m) => m.id === id);
 		if (!model || !confirm(`Delete ${model.id} from disk?`)) return;
-		await invoke('delete_gigaam_model', { modelId: id });
+		await invoke(`delete_${engine}_model`, { modelId: id });
 		// The deleted card may have been the pinned pick.
-		if (settings?.gigaam_model_id === id) {
-			settings.gigaam_model_id = null;
+		if (settings?.[`${engine}_model_id`] === id) {
+			settings[`${engine}_model_id`] = null;
 			await persistOwn();
 		}
 		await refreshModels();
 	}
 
-	async function pickGigaam(id: string | null) {
+	async function pickCard(engine: CardEngine, id: string | null) {
 		if (!settings) return;
-		settings.gigaam_model_id = id;
+		settings[`${engine}_model_id`] = id;
 		await persistOwn();
 		await refreshModels();
 	}
@@ -213,9 +231,9 @@
 		await invoke('open_models_dir');
 	}
 
-	// One run covers both engines (both catalogs are fetched and hashed
+	// One run covers all engines (the catalogs are fetched and hashed
 	// together). The single button lives on the General sub-tab; verdicts
-	// surface in its report row and as badges on GigaAM cards.
+	// surface in its report row and as badges on GigaAM/Qwen3-ASR cards.
 	async function checkUpdates() {
 		if (checking) return;
 		checking = true;
@@ -270,6 +288,88 @@
 	});
 </script>
 
+{#snippet modelCards(engine: CardEngine)}
+	<div class="cards">
+		<div
+			class="card"
+			class:active={settings?.[`${engine}_model_id`] === null && cardModels[engine].some((m) => m.installed)}
+			role="button"
+			tabindex="0"
+			onclick={() => pickCard(engine, null)}
+			onkeydown={(e) => e.key === 'Enter' && pickCard(engine, null)}
+		>
+			<span class="name">Auto</span>
+			<span class="desc">the most recent download is used</span>
+		</div>
+		{#each cardModels[engine] as model (model.id)}
+			{@const p = cardProgress(model.id)}
+			<div
+				class="card"
+				class:active={model.active}
+				role="button"
+				tabindex="0"
+				onclick={() => pickCard(engine, model.id)}
+				onkeydown={(e) => e.key === 'Enter' && pickCard(engine, model.id)}
+			>
+				<div class="head">
+					<span class="name">{model.id}</span>
+					{#if updates[model.id] !== undefined}
+						<span class="badge {updates[model.id] ? 'ok' : 'stale'}">
+							{updates[model.id] ? 'up to date' : 'update available'}
+						</span>
+					{/if}
+					{#if model.active}<span class="badge">active</span>{/if}
+				</div>
+				<span class="desc">{model.note}</span>
+				<span class="size">
+					{model.installed
+						? formatSize(model.size_bytes)
+						: `download ≈ ${formatSize(model.approx_bytes)}`}
+				</span>
+				{#if p}
+					<div class="progress">
+						<div
+							class="bar"
+							style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"
+						></div>
+						<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
+					</div>
+				{:else if model.installed}
+					<div class="actions">
+						<button
+							type="button"
+							class="icon"
+							title="Re-download"
+							onclick={() => downloadCard(engine, model.id)}
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
+						</button>
+						<button
+							type="button"
+							class="icon danger"
+							title="Delete from disk"
+							onclick={() => removeCard(engine, model.id)}
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+						</button>
+					</div>
+				{:else}
+					<div class="actions">
+						<button
+							type="button"
+							class="icon"
+							title="Download"
+							onclick={() => downloadCard(engine, model.id)}
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+						</button>
+					</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
 {#if settings}
 	<form onsubmit={(e) => { e.preventDefault(); save(); }}>
 		<nav class="subnav">
@@ -281,6 +381,9 @@
 			</button>
 			<button type="button" class:active={subTab === 'gigaam'} onclick={() => (subTab = 'gigaam')}>
 				GigaAM
+			</button>
+			<button type="button" class:active={subTab === 'qwen'} onclick={() => (subTab = 'qwen')}>
+				Qwen3-ASR
 			</button>
 			<button
 				type="button"
@@ -295,12 +398,24 @@
 				<section>
 					<h2>Dictation</h2>
 					<label>
-						Language
-						<select bind:value={settings.language}>
-							{#each LANGUAGES as lang (lang.value)}
-								<option value={lang.value}>{lang.label}</option>
+						Engine
+						<select bind:value={settings.engine}>
+							{#each ENGINES as engine (engine.value)}
+								<option value={engine.value}>{engine.label}</option>
 							{/each}
 						</select>
+					</label>
+					<label>
+						Language
+						{#if settings.engine === 'gigaam'}
+							<select disabled><option>RU</option></select>
+						{:else}
+							<select bind:value={settings.language}>
+								{#each LANGUAGES as lang (lang.value)}
+									<option value={lang.value}>{lang.label}</option>
+								{/each}
+							</select>
+						{/if}
 					</label>
 					<label>
 						Silence threshold (0–1; recordings below it are skipped, 0 = off)
@@ -332,14 +447,14 @@
 						<button type="button" disabled={checking} onclick={() => checkUpdates()}>
 							{checking ? 'Checking…' : 'Check for updates'}
 						</button>
-						{#each [...models, ...gigaamModels].filter((m) => m.installed && updates[m.id] !== undefined) as m (m.id)}
+						{#each [...models, ...cardModels.gigaam, ...cardModels.qwen].filter((m) => m.installed && updates[m.id] !== undefined) as m (m.id)}
 							<span class={updates[m.id] ? 'ok' : 'stale'}>
 								{m.id}: {updates[m.id] ? 'up to date' : 'update available'}
 							</span>
 						{/each}
 					</div>
 					<p class="hint">
-						Hashes installed models of both engines and compares them with huggingface.co.
+						Hashes installed models of all engines and compares them with huggingface.co.
 					</p>
 				</section>
 
@@ -350,7 +465,7 @@
 						{#if unloadedAt}<span class="muted">unloaded at {unloadedAt}</span>{/if}
 					</div>
 					<p class="hint">
-						Frees the weights of both engines from GPU/system memory; they reload on the
+						Frees the weights of all engines from GPU/system memory; they reload on the
 						next dictation. Switching models unloads automatically.
 					</p>
 				</section>
@@ -435,89 +550,18 @@
 			{:else if subTab === 'gigaam'}
 				<section>
 					<p class="hint">
-						Used when the language is RU (GigaAM); CPU-only. Auto, EN and RU
-						(Whisper) stay on Whisper. Without a downloaded model, RU (GigaAM)
-						also falls back to Whisper.
+						Russian only, CPU-only; the language setting is ignored. Without a
+						downloaded model the GigaAM engine falls back to Whisper.
 					</p>
-					<div class="cards">
-						<div
-							class="card"
-							class:active={settings.gigaam_model_id === null && gigaamModels.some((m) => m.installed)}
-							role="button"
-							tabindex="0"
-							onclick={() => pickGigaam(null)}
-							onkeydown={(e) => e.key === 'Enter' && pickGigaam(null)}
-						>
-							<span class="name">Auto</span>
-							<span class="desc">the most recent download is used</span>
-						</div>
-						{#each gigaamModels as model (model.id)}
-							{@const p = gigaamProgress(model.id)}
-							<div
-								class="card"
-								class:active={model.active}
-								role="button"
-								tabindex="0"
-								onclick={() => pickGigaam(model.id)}
-								onkeydown={(e) => e.key === 'Enter' && pickGigaam(model.id)}
-							>
-								<div class="head">
-									<span class="name">{model.id}</span>
-									{#if updates[model.id] !== undefined}
-										<span class="badge {updates[model.id] ? 'ok' : 'stale'}">
-											{updates[model.id] ? 'up to date' : 'update available'}
-										</span>
-									{/if}
-									{#if model.active}<span class="badge">active</span>{/if}
-								</div>
-								<span class="desc">{model.note}</span>
-								<span class="size">
-									{model.installed
-										? formatSize(model.size_bytes)
-										: `download ≈ ${formatSize(model.approx_bytes)}`}
-								</span>
-								{#if p}
-									<div class="progress">
-										<div
-											class="bar"
-											style="width: {p.total ? Math.min(100, (p.downloaded / p.total) * 100) : 0}%"
-										></div>
-										<span>{formatSize(p.downloaded)}{p.total ? ` / ${formatSize(p.total)}` : ''}</span>
-									</div>
-								{:else if model.installed}
-									<div class="actions">
-										<button
-											type="button"
-											class="icon"
-											title="Re-download"
-											onclick={() => downloadGigaam(model.id)}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
-										</button>
-										<button
-											type="button"
-											class="icon danger"
-											title="Delete from disk"
-											onclick={() => removeGigaam(model.id)}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-										</button>
-									</div>
-								{:else}
-									<div class="actions">
-										<button
-											type="button"
-											class="icon"
-											title="Download"
-											onclick={() => downloadGigaam(model.id)}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-										</button>
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
+					{@render modelCards('gigaam')}
+				</section>
+			{:else if subTab === 'qwen'}
+				<section>
+					<p class="hint">
+						Multilingual with language detection, CPU-only. Prompts are not
+						supported.
+					</p>
+					{@render modelCards('qwen')}
 				</section>
 			{:else}
 				<section>

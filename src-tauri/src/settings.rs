@@ -12,12 +12,22 @@ pub struct NamedPrompt {
 	pub text: String,
 }
 
+/// Which ASR engine transcribes (see pipeline.rs for the routing).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+	#[default]
+	Whisper,
+	/// Russian only: `language` is ignored.
+	Gigaam,
+	Qwen,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-	/// Whisper language code, "auto" for detection, or "ru-whisper" for
-	/// Russian pinned to whisper (plain "ru" routes to GigaAM; see
-	/// pipeline.rs).
+	pub engine: Engine,
+	/// Language code, or "auto" for detection.
 	pub language: String,
 	/// GPU device index passed to whisper (`gpu_device`); 0 = first GPU.
 	pub gpu_device: i32,
@@ -30,6 +40,9 @@ pub struct Settings {
 	/// Chosen GigaAM model id (see models::GIGAAM_CHOICES); None = most
 	/// recent download in the gigaam subdir.
 	pub gigaam_model_id: Option<String>,
+	/// Chosen Qwen3-ASR model id (see models::QWEN_CHOICES); None = most
+	/// recent download in the qwen subdir.
+	pub qwen_model_id: Option<String>,
 	/// Named initial prompts; `active_prompt` names the one in use (None = off).
 	pub prompts: Vec<NamedPrompt>,
 	pub active_prompt: Option<String>,
@@ -48,12 +61,14 @@ pub struct Settings {
 impl Default for Settings {
 	fn default() -> Self {
 		Self {
+			engine: Engine::default(),
 			language: "auto".into(),
 			gpu_device: 0,
 			use_gpu: true,
 			model_path: None,
 			model_id: None,
 			gigaam_model_id: None,
+			qwen_model_id: None,
 			prompts: vec![NamedPrompt {
 				name: "ru-en mix".into(),
 				text: "Сегодня у нас meeting по архитектуре, я закинул PR и обновил roadmap. "
@@ -77,7 +92,25 @@ pub fn load() -> Settings {
 	let Ok(text) = std::fs::read_to_string(path()) else {
 		return Settings::default();
 	};
-	serde_json::from_str(&text).unwrap_or_default()
+	let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+		return Settings::default();
+	};
+	let has_engine = value.get("engine").is_some();
+	let mut settings: Settings = serde_json::from_value(value).unwrap_or_default();
+	if !has_engine {
+		migrate_language_rows(&mut settings);
+	}
+	settings
+}
+
+/// Files written before the `engine` setting encoded the engine in the
+/// language: "ru" meant GigaAM and "ru-whisper" Russian on whisper.
+fn migrate_language_rows(settings: &mut Settings) {
+	match settings.language.as_str() {
+		"ru" => settings.engine = Engine::Gigaam,
+		"ru-whisper" => settings.language = "ru".into(),
+		_ => {}
+	}
 }
 
 pub fn save(settings: &Settings) -> Result<(), String> {
@@ -105,9 +138,15 @@ pub fn set_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Str
 		|| settings.use_gpu != previous.use_gpu
 	{
 		crate::pipeline::unload_transcriber(&app);
-	} else if settings.gigaam_model_id != previous.gigaam_model_id {
-		// Only the GigaAM pick changed: drop that engine, keep whisper cached.
-		crate::pipeline::unload_gigaam(&app);
+	} else {
+		// Only a GigaAM/Qwen3-ASR pick changed: drop that engine, keep the
+		// others cached.
+		if settings.gigaam_model_id != previous.gigaam_model_id {
+			crate::pipeline::unload_gigaam(&app);
+		}
+		if settings.qwen_model_id != previous.qwen_model_id {
+			crate::pipeline::unload_qwen(&app);
+		}
 	}
 	Ok(())
 }

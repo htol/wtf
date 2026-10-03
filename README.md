@@ -19,13 +19,14 @@ make clean      # clean cargo + vite artifacts
 
 ## Engines
 
-Whisper handles auto-detect and all languages; the `RU (GigaAM)` language row
-routes Russian dictation to the GigaAM v3 engine (`ort`/ONNX Runtime, CPU)
-when its model is downloaded — Settings, "Russian engine" cards. The
-`RU (Whisper)` row keeps Russian on whisper. Model files live in
-`~/.local/share/wtf/models/gigaam/`; the mel preprocessor and Silero VAD
-graphs are vendored in `src-tauri/assets/` (MIT). The first build downloads
-a prebuilt libonnxruntime (cargo feature `download-binaries` of `ort`).
+The engine is picked in Settings, General. Whisper handles auto-detect and
+all languages. GigaAM v3 (`ort`/ONNX Runtime, CPU) is Russian only; its model
+files live in `~/.local/share/wtf/models/gigaam/`, and the mel preprocessor
+and Silero VAD graphs are vendored in `src-tauri/assets/` (MIT). Qwen3-ASR
+(0.6B or 1.7B, int4 ONNX, CPU) is multilingual with language detection; its
+model files live in `~/.local/share/wtf/models/qwen/`. The first build
+downloads a prebuilt libonnxruntime (cargo feature `download-binaries` of
+`ort`).
 
 ## Runtime dependencies
 

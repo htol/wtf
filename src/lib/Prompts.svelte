@@ -88,8 +88,8 @@
 
 <div class="wrap">
 	<p class="banner">
-		Prompts apply to Whisper only (every language row except RU (GigaAM));
-		the GigaAM engine does not support prompts.
+		Prompts apply to the Whisper engine only; GigaAM and Qwen3-ASR do not
+		support prompts.
 	</p>
 	<div class="prompts">
 		<div class="list">
