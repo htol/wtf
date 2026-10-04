@@ -73,7 +73,8 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
   on; answer Always Allow when codesign asks for the key. Creating it
   resets the grants once. `SIGN_IDENTITY=<name>` picks another identity.
 - Builds before the rename to `htol.wtf` used the identifier
-  `local.wtf.app`; `make purge-old-id` removes its grants and webview data.
+  `local.wtf.app`; `make purge-old-id` removes its grants, webview data and
+  login agent (run `make enable` again afterwards).
 - `make dev` runs unbundled: the permissions then belong to the terminal
   that started it. Unlike on Linux, it runs whisper on the GPU (Metal).
 - Qwen3-ASR downloads the pinned llama.cpp Metal build instead of the

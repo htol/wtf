@@ -14,10 +14,12 @@ RELEASE_BIN := src-tauri/target/release/$(BIN_NAME)
 # permission needs its Info.plist).
 APP_BUNDLE := src-tauri/target/release/bundle/macos/$(BIN_NAME).app
 INSTALL_APP := $(HOME)/Applications/$(BIN_NAME).app
-LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/local.wtf.autostart.plist
 UNAME_S := $(shell uname -s)
-# Keep in sync with "identifier" in src-tauri/tauri.conf.json.
-BUNDLE_ID := htol.wtf
+# The app identifier has one home, tauri.conf.json; everything named after
+# it here is derived.
+BUNDLE_ID := $(shell sed -n 's/.*"identifier": "\(.*\)".*/\1/p' src-tauri/tauri.conf.json)
+LAUNCH_AGENT_LABEL := $(BUNDLE_ID).autostart
+LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/$(LAUNCH_AGENT_LABEL).plist
 
 .PHONY: dev build smoke install enable check clean npm-install signing-cert purge-old-id
 
@@ -107,7 +109,8 @@ ifeq ($(UNAME_S),Darwin)
 # starts the app now.
 enable:
 	mkdir -p $(dir $(LAUNCH_AGENT))
-	sed 's|@APP@|$(INSTALL_APP)|' assets/wtf.launchagent.plist > $(LAUNCH_AGENT)
+	sed -e 's|@APP@|$(INSTALL_APP)|' -e 's|@LABEL@|$(LAUNCH_AGENT_LABEL)|' \
+		assets/wtf.launchagent.plist > $(LAUNCH_AGENT)
 	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
 	launchctl bootstrap gui/$$(id -u) $(LAUNCH_AGENT)
 else
@@ -117,10 +120,13 @@ endif
 
 # Removes what the previous identifier, local.wtf.app, left behind: the
 # webview data and caches kept per identifier and, on macOS, the privacy
-# grants. Settings, history and models live under "wtf" and are not touched.
+# grants and the login agent (re-run `make enable` afterwards). Settings,
+# history and models live under "wtf" and are not touched.
 ifeq ($(UNAME_S),Darwin)
 purge-old-id:
 	-tccutil reset All local.wtf.app
+	-launchctl bootout gui/$$(id -u)/local.wtf.autostart 2>/dev/null
+	rm -f "$(HOME)/Library/LaunchAgents/local.wtf.autostart.plist"
 	rm -rf "$(HOME)/Library/WebKit/local.wtf.app"
 	rm -rf "$(HOME)/Library/Caches/local.wtf.app"
 	rm -rf "$(HOME)/Library/HTTPStorages/local.wtf.app"

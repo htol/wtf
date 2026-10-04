@@ -3,8 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>local.wtf.autostart</string>
-	<!-- @APP@ is replaced with the installed bundle path by `make enable`. -->
+	<string>@LABEL@</string>
+	<!-- `make enable` fills in @LABEL@ (app identifier + ".autostart") and
+	     @APP@ (the installed bundle path). -->
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/bin/open</string>
