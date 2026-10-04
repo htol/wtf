@@ -206,7 +206,7 @@ impl WhisperTranscriber {
 		if let Some(prompt) = initial_prompt {
 			params.set_initial_prompt(prompt);
 		}
-		let mut state = &mut self.state;
+		let state = &mut self.state;
 		state
 			.full(params, samples)
 			.map_err(|e| format!("transcription failed: {e}"))?;
