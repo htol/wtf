@@ -56,6 +56,9 @@ pub struct Settings {
 	/// tray and "Open wtf" (tray menu, second-instance handler) brings the
 	/// window back.
 	pub start_hidden: bool,
+	/// Input device name (see audio::list_input_devices); None = the
+	/// system default.
+	pub input_device: Option<String>,
 	/// Global shortcut that toggles recording, e.g. "Alt+Backquote"; empty =
 	/// unbound. macOS only: on Linux the desktop portal owns the bindings.
 	#[cfg(target_os = "macos")]
@@ -91,6 +94,7 @@ impl Default for Settings {
 			#[cfg(target_os = "macos")]
 			silence_peak: 0.02,
 			start_hidden: false,
+			input_device: None,
 			#[cfg(target_os = "macos")]
 			record_shortcut: "Alt+Backquote".into(),
 			#[cfg(target_os = "macos")]

@@ -17,6 +17,7 @@
 		overlay_x: number;
 		overlay_y: number;
 		start_hidden: boolean;
+		input_device: string | null;
 		// macOS only: on Linux the desktop portal owns the bindings and the
 		// backend sends no such fields.
 		record_shortcut?: string;
@@ -85,6 +86,7 @@
 	let models = $state<ModelInfo[]>([]);
 	let cardModels = $state<Record<CardEngine, CardModelInfo[]>>({ gigaam: [], qwen: [] });
 	let gpus = $state<GpuDevice[]>([]);
+	let inputDevices = $state<string[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	// Snapshot of the persisted values this tab owns; divergence from the
 	// live form state is what enables the tab-bar Save button.
@@ -111,6 +113,7 @@
 			settings.qwen_model_id,
 			settings.silence_peak,
 			settings.start_hidden,
+			settings.input_device,
 			settings.record_shortcut,
 			settings.cycle_language_shortcut
 		]);
@@ -159,6 +162,7 @@
 		current.qwen_model_id = settings.qwen_model_id;
 		current.silence_peak = settings.silence_peak;
 		current.start_hidden = settings.start_hidden;
+		current.input_device = settings.input_device;
 		current.record_shortcut = settings.record_shortcut;
 		current.cycle_language_shortcut = settings.cycle_language_shortcut;
 		await invoke('set_settings', { settings: current });
@@ -298,6 +302,7 @@
 			refreshModels();
 		});
 		invoke<GpuDevice[]>('list_gpu_devices').then((devices) => (gpus = devices));
+		invoke<string[]>('list_input_devices').then((devices) => (inputDevices = devices));
 		const unlisten = listen<DownloadProgress>('model-download', (event) => {
 			progress[event.payload.id] = event.payload;
 		});
@@ -436,6 +441,20 @@
 								{/each}
 							</select>
 						{/if}
+					</label>
+					<label>
+						Microphone
+						<select bind:value={settings.input_device}>
+							<option value={null}>System default</option>
+							{#if settings.input_device !== null && !inputDevices.includes(settings.input_device)}
+								<option value={settings.input_device}>
+									{settings.input_device} (not connected)
+								</option>
+							{/if}
+							{#each inputDevices as device (device)}
+								<option value={device}>{device}</option>
+							{/each}
+						</select>
 					</label>
 					<label>
 						Silence threshold (0–1; recordings below it are skipped, 0 = off)

@@ -139,6 +139,7 @@ pub fn run() {
 			models::delete_qwen_model,
 			models::check_model_updates,
 			inject::copy_to_clipboard,
+			audio::list_input_devices,
 			asr::list_gpu_devices,
 			hotkey::rebind_shortcuts,
 			pipeline::unload_model

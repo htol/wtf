@@ -81,7 +81,7 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 		});
 		return;
 	}
-	match audio::Recorder::start() {
+	match audio::Recorder::start(settings::load().input_device) {
 		Ok(recorder) => {
 			*slot = Some(recorder);
 			crate::tray::set_recording(app, true);

@@ -165,18 +165,51 @@ where
 		.map_err(|e| e.to_string())
 }
 
-/// Opens and starts an input stream on the default device at its native
-/// rate. Returns the stream and that rate.
-fn open_default_input(
+/// Names of the input devices, in host order, for the Settings picker.
+#[tauri::command]
+pub fn list_input_devices() -> Vec<String> {
+	use cpal::traits::{DeviceTrait, HostTrait};
+
+	let Ok(devices) = cpal::default_host().input_devices() else {
+		return Vec::new();
+	};
+	let mut names: Vec<String> = Vec::new();
+	for name in devices.filter_map(|device| device.name().ok()) {
+		if !names.contains(&name) {
+			names.push(name);
+		}
+	}
+	names
+}
+
+/// Opens and starts an input stream at the device's native rate. Returns
+/// the stream and that rate. `device_name` picks a device from
+/// `list_input_devices`; None, or a device that is gone (unplugged), means
+/// the system default.
+fn open_input(
+	device_name: Option<&str>,
 	samples: Arc<Mutex<Vec<f32>>>,
 	level: Arc<AtomicU32>,
 ) -> Result<(cpal::Stream, u32), String> {
 	use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 	let host = cpal::default_host();
-	let device = host
-		.default_input_device()
-		.ok_or("no default input device")?;
+	let chosen = device_name.and_then(|wanted| {
+		let found = host
+			.input_devices()
+			.ok()?
+			.find(|device| device.name().is_ok_and(|name| name == wanted));
+		if found.is_none() {
+			eprintln!("input device {wanted:?} not found, using the default");
+		}
+		found
+	});
+	let device = match chosen {
+		Some(device) => device,
+		None => host
+			.default_input_device()
+			.ok_or("no default input device")?,
+	};
 	let supported = device.default_input_config().map_err(|e| e.to_string())?;
 	let channels = supported.channels();
 	let sample_rate = supported.sample_rate();
@@ -229,8 +262,9 @@ pub struct Recorder {
 }
 
 impl Recorder {
-	/// Starts capturing from the default input device at its native rate.
-	pub fn start() -> Result<Self, String> {
+	/// Starts capturing at the device's native rate; `device_name` as in
+	/// `open_input`.
+	pub fn start(device_name: Option<String>) -> Result<Self, String> {
 		let samples = Arc::new(Mutex::new(Vec::new()));
 		let level = Arc::new(AtomicU32::new(0));
 		let (stop, stopped) = std::sync::mpsc::channel::<()>();
@@ -238,7 +272,7 @@ impl Recorder {
 		let thread = {
 			let samples = Arc::clone(&samples);
 			let level = Arc::clone(&level);
-			std::thread::spawn(move || match open_default_input(samples, level) {
+			std::thread::spawn(move || match open_input(device_name.as_deref(), samples, level) {
 				Ok((stream, sample_rate)) => {
 					let _ = opened_tx.send(Ok(sample_rate));
 					// Returns once `Recorder` drops the sender.
