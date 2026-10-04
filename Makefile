@@ -16,6 +16,8 @@ APP_BUNDLE := src-tauri/target/release/bundle/macos/$(BIN_NAME).app
 INSTALL_APP := $(HOME)/Applications/$(BIN_NAME).app
 LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/local.wtf.autostart.plist
 UNAME_S := $(shell uname -s)
+# Keep in sync with "identifier" in src-tauri/tauri.conf.json.
+BUNDLE_ID := htol.wtf
 
 .PHONY: dev build smoke install enable check clean npm-install signing-cert
 
@@ -56,8 +58,8 @@ signing-cert:
 		-name $(SIGN_CERT) -out "$$tmp/cert.p12" -passout pass:$(SIGN_CERT); \
 	security import "$$tmp/cert.p12" -k $(HOME)/Library/Keychains/login.keychain-db \
 		-P $(SIGN_CERT) -T /usr/bin/codesign; \
-	tccutil reset Accessibility local.wtf.app; \
-	tccutil reset Microphone local.wtf.app; \
+	tccutil reset Accessibility $(BUNDLE_ID); \
+	tccutil reset Microphone $(BUNDLE_ID); \
 	echo "Created the $(SIGN_CERT) signing certificate; grant the permissions once more."
 
 # Production build: wtf.app with the frontend dist embedded and ASR on the

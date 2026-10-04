@@ -108,7 +108,7 @@ Three ASR engines behind one seam (`asr::Transcriber`):
 - Working name `wtf`. `src-tauri/src/app_id.rs` is the single source of truth
   for the app id and data/config paths, so a later rename is one change +
   a one-time data-directory migration.
-- Tauri identifier: `local.wtf.app`.
+- Tauri identifier: `htol.wtf`.
 
 ## Launch / install
 

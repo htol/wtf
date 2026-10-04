@@ -67,7 +67,7 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
   recording. The app asks for both.
 - macOS ties these grants to the code signature. By default the bundle is
   ad-hoc signed and loses them on every rebuild, leaving a stale entry in
-  the Accessibility list (`tccutil reset Accessibility local.wtf.app`
+  the Accessibility list (`tccutil reset Accessibility htol.wtf`
   clears it). To keep them, the first `make build` creates a self-signed
   `wtf-dev` certificate in the login keychain and signs with it from then
   on; answer Always Allow when codesign asks for the key. Creating it
