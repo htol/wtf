@@ -294,6 +294,83 @@ pub fn unload_model(app: tauri::AppHandle) {
 	unload_transcriber(&app);
 }
 
+/// An engine slot of `Dictation`: the loaded engine and its model path.
+type Slot = Option<(PathBuf, asr::Transcriber)>;
+
+/// Loads the whisper model into `slot` unless it already holds that model.
+fn load_whisper(slot: &mut Slot, model: &std::path::Path) -> Result<(), String> {
+	if slot.as_ref().is_some_and(|(path, _)| path == model) {
+		return Ok(());
+	}
+	let settings = settings::load();
+	eprintln!("loading model {}...", model.display());
+	*slot = Some((
+		model.to_path_buf(),
+		asr::Transcriber::whisper(
+			&model.to_string_lossy(),
+			settings.gpu_device,
+			settings.use_gpu,
+		)?,
+	));
+	Ok(())
+}
+
+/// Loads the GigaAM model into `slot` unless it already holds that model.
+fn load_gigaam(slot: &mut Slot, model: &std::path::Path) -> Result<(), String> {
+	if slot.as_ref().is_some_and(|(path, _)| path == model) {
+		return Ok(());
+	}
+	eprintln!("loading gigaam model {}...", model.display());
+	*slot = Some((
+		model.to_path_buf(),
+		asr::Transcriber::GigaAm(crate::gigaam::GigaAm::new(model)?),
+	));
+	Ok(())
+}
+
+/// Starts the Qwen3-ASR server for `model` in `slot` unless it already runs
+/// that model.
+fn load_qwen(slot: &mut Slot, model: &std::path::Path) -> Result<(), String> {
+	if slot.as_ref().is_some_and(|(path, _)| path == model) {
+		return Ok(());
+	}
+	eprintln!("loading qwen model {}...", model.display());
+	*slot = Some((
+		model.to_path_buf(),
+		asr::Transcriber::Qwen(crate::qwen::Qwen::new(model)?),
+	));
+	Ok(())
+}
+
+/// Loads the engine a dictation would use right now (same routing as
+/// `transcribe_and_paste`), so the first dictation does not wait for it.
+/// A missing model is left for the first dictation to report.
+pub fn preload(app: &tauri::AppHandle) -> Result<(), String> {
+	let settings = settings::load();
+	let state = app.state::<Dictation>();
+	let whisper = || models::resolve(settings.model_path.as_deref(), settings.model_id.as_deref());
+	match settings.engine {
+		settings::Engine::Gigaam => {
+			if let Some(model) = models::resolve_gigaam(settings.gigaam_model_id.as_deref()) {
+				load_gigaam(&mut state.gigaam.lock().unwrap(), &model)?;
+			} else if let Some(model) = whisper() {
+				load_whisper(&mut state.whisper.lock().unwrap(), &model)?;
+			}
+		}
+		settings::Engine::Qwen => {
+			if let Some(model) = models::resolve_qwen(settings.qwen_model_id.as_deref()) {
+				load_qwen(&mut state.qwen.lock().unwrap(), &model)?;
+			}
+		}
+		settings::Engine::Whisper => {
+			if let Some(model) = whisper() {
+				load_whisper(&mut state.whisper.lock().unwrap(), &model)?;
+			}
+		}
+	}
+	Ok(())
+}
+
 fn transcribe_whisper_cached(
 	app: &tauri::AppHandle,
 	model: &std::path::Path,
@@ -301,20 +378,9 @@ fn transcribe_whisper_cached(
 	language: Option<&str>,
 	initial_prompt: Option<&str>,
 ) -> Result<(String, String), String> {
-	let settings = settings::load();
 	let state = app.state::<Dictation>();
 	let mut cached = state.whisper.lock().unwrap();
-	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
-		eprintln!("loading model {}...", model.display());
-		*cached = Some((
-			model.to_path_buf(),
-			asr::Transcriber::whisper(
-				&model.to_string_lossy(),
-				settings.gpu_device,
-				settings.use_gpu,
-			)?,
-		));
-	}
+	load_whisper(&mut cached, model)?;
 	cached
 		.as_mut()
 		.expect("transcriber was just stored")
@@ -329,13 +395,7 @@ fn transcribe_gigaam_cached(
 ) -> Result<String, String> {
 	let state = app.state::<Dictation>();
 	let mut cached = state.gigaam.lock().unwrap();
-	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
-		eprintln!("loading gigaam model {}...", model.display());
-		*cached = Some((
-			model.to_path_buf(),
-			asr::Transcriber::GigaAm(crate::gigaam::GigaAm::new(model)?),
-		));
-	}
+	load_gigaam(&mut cached, model)?;
 	let (text, _lang) = cached
 		.as_mut()
 		.expect("transcriber was just stored")
@@ -352,13 +412,7 @@ fn transcribe_qwen_cached(
 ) -> Result<(String, String), String> {
 	let state = app.state::<Dictation>();
 	let mut cached = state.qwen.lock().unwrap();
-	if !cached.as_ref().is_some_and(|(path, _)| path == model) {
-		eprintln!("loading qwen model {}...", model.display());
-		*cached = Some((
-			model.to_path_buf(),
-			asr::Transcriber::Qwen(crate::qwen::Qwen::new(model)?),
-		));
-	}
+	load_qwen(&mut cached, model)?;
 	cached
 		.as_mut()
 		.expect("transcriber was just stored")

@@ -56,6 +56,9 @@ pub struct Settings {
 	/// tray and "Open wtf" (tray menu, second-instance handler) brings the
 	/// window back.
 	pub start_hidden: bool,
+	/// Load the selected engine's model at launch instead of on the first
+	/// dictation.
+	pub preload_model: bool,
 	/// Input device name (see audio::list_input_devices); None = the
 	/// system default.
 	pub input_device: Option<String>,
@@ -94,6 +97,7 @@ impl Default for Settings {
 			#[cfg(target_os = "macos")]
 			silence_peak: 0.02,
 			start_hidden: false,
+			preload_model: false,
 			input_device: None,
 			#[cfg(target_os = "macos")]
 			record_shortcut: "Alt+Backquote".into(),

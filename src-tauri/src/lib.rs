@@ -114,10 +114,20 @@ pub fn run() {
 			// With start_hidden the settings window stays in the tray at launch;
 			// setup runs before the event loop maps the window, so it never
 			// flashes. The tray menu and single-instance handler show it.
-			if settings::load().start_hidden {
+			let settings = settings::load();
+			if settings.start_hidden {
 				if let Some(main) = app.get_webview_window("main") {
 					let _ = main.hide();
 				}
+			}
+			if settings.preload_model {
+				let app = app.handle().clone();
+				// Loading takes seconds: keep it off the main thread.
+				tauri::async_runtime::spawn_blocking(move || {
+					if let Err(e) = pipeline::preload(&app) {
+						eprintln!("model preload failed: {e}");
+					}
+				});
 			}
 			Ok(())
 		})

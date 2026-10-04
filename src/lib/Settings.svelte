@@ -17,6 +17,7 @@
 		overlay_x: number;
 		overlay_y: number;
 		start_hidden: boolean;
+		preload_model: boolean;
 		input_device: string | null;
 		// macOS only: on Linux the desktop portal owns the bindings and the
 		// backend sends no such fields.
@@ -113,6 +114,7 @@
 			settings.qwen_model_id,
 			settings.silence_peak,
 			settings.start_hidden,
+			settings.preload_model,
 			settings.input_device,
 			settings.record_shortcut,
 			settings.cycle_language_shortcut
@@ -162,6 +164,7 @@
 		current.qwen_model_id = settings.qwen_model_id;
 		current.silence_peak = settings.silence_peak;
 		current.start_hidden = settings.start_hidden;
+		current.preload_model = settings.preload_model;
 		current.input_device = settings.input_device;
 		current.record_shortcut = settings.record_shortcut;
 		current.cycle_language_shortcut = settings.cycle_language_shortcut;
@@ -477,6 +480,14 @@
 					<p class="hint">
 						The daemon keeps running either way; reopen the window from the
 						tray menu ("Open wtf") or by launching the app again.
+					</p>
+					<label>
+						<input type="checkbox" bind:checked={settings.preload_model} />
+						Load the model at startup
+					</label>
+					<p class="hint">
+						The first dictation then starts without the model-loading delay; the
+						model takes its memory from launch on. Applies at the next start.
 					</p>
 				</section>
 
