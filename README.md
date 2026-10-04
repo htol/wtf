@@ -56,7 +56,8 @@ first build downloads a prebuilt libonnxruntime (cargo feature
 
 `make build` produces `src-tauri/target/release/bundle/macos/wtf.app`
 (whisper on the GPU via Metal), `make install` copies it to
-`~/Applications`. `make smoke` and `make enable` are Linux only.
+`~/Applications`, `make enable` starts it now and at every login (a
+LaunchAgent in `~/Library/LaunchAgents`). `make smoke` is Linux only.
 Building needs `cmake` (whisper.cpp): `brew install cmake`.
 
 - Shortcuts are set in Settings, Shortcuts (default: Option+` toggles

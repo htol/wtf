@@ -14,6 +14,7 @@ RELEASE_BIN := src-tauri/target/release/$(BIN_NAME)
 # permission needs its Info.plist).
 APP_BUNDLE := src-tauri/target/release/bundle/macos/$(BIN_NAME).app
 INSTALL_APP := $(HOME)/Applications/$(BIN_NAME).app
+LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/local.wtf.autostart.plist
 UNAME_S := $(shell uname -s)
 
 .PHONY: dev build smoke install enable check clean npm-install
@@ -50,7 +51,7 @@ ifeq ($(UNAME_S),Darwin)
 install: build
 	mkdir -p $(HOME)/Applications
 	ditto $(APP_BUNDLE) $(INSTALL_APP)
-	@echo "Installed $(INSTALL_APP)"
+	@echo "Installed $(INSTALL_APP). Start it (now + on login) with: make enable"
 else
 install: build
 	install -Dm755 $(RELEASE_BIN) $(INSTALL_BIN)
@@ -64,8 +65,18 @@ install: build
 	@echo "Installed. Start it (now + on login) with: make enable"
 endif
 
+ifeq ($(UNAME_S),Darwin)
+# A LaunchAgent that opens the installed bundle at login; loading it also
+# starts the app now.
+enable:
+	mkdir -p $(dir $(LAUNCH_AGENT))
+	sed 's|@APP@|$(INSTALL_APP)|' assets/wtf.launchagent.plist > $(LAUNCH_AGENT)
+	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) $(LAUNCH_AGENT)
+else
 enable:
 	systemctl --user enable --now $(UNIT_NAME)
+endif
 
 clean:
 	cargo clean --manifest-path src-tauri/Cargo.toml
