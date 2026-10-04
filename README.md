@@ -68,11 +68,10 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
 - macOS ties these grants to the code signature. By default the bundle is
   ad-hoc signed and loses them on every rebuild, leaving a stale entry in
   the Accessibility list (`tccutil reset Accessibility local.wtf.app`
-  clears it). To keep them, create a certificate once: Keychain Access,
-  menu Keychain Access, Certificate Assistant, Create a Certificate; name
-  `wtf-dev`, identity type Self Signed Root, certificate type Code Signing.
-  `make build` signs with it when it exists; answer Always Allow when
-  codesign asks for the key. `SIGN_IDENTITY=<name>` picks another one.
+  clears it). To keep them, the first `make build` creates a self-signed
+  `wtf-dev` certificate in the login keychain and signs with it from then
+  on; answer Always Allow when codesign asks for the key. Creating it
+  resets the grants once. `SIGN_IDENTITY=<name>` picks another identity.
 - `make dev` runs unbundled: the permissions then belong to the terminal
   that started it. Unlike on Linux, it runs whisper on the GPU (Metal).
 - Qwen3-ASR downloads the pinned llama.cpp Metal build instead of the

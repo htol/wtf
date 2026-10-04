@@ -17,7 +17,7 @@ INSTALL_APP := $(HOME)/Applications/$(BIN_NAME).app
 LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/local.wtf.autostart.plist
 UNAME_S := $(shell uname -s)
 
-.PHONY: dev build smoke install enable check clean npm-install
+.PHONY: dev build smoke install enable check clean npm-install signing-cert
 
 npm-install:
 	npm install
@@ -34,13 +34,35 @@ endif
 ifeq ($(UNAME_S),Darwin)
 # macOS ties the microphone and Accessibility grants to the code signature.
 # An ad-hoc signature ("-") changes with every build and loses them; a
-# self-signed "wtf-dev" certificate in the keychain keeps them (README,
-# macOS).
-SIGN_IDENTITY ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"wtf-dev"' && echo wtf-dev || echo -)
+# self-signed certificate in the keychain keeps them (README, macOS).
+SIGN_CERT := wtf-dev
+SIGN_IDENTITY ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"$(SIGN_CERT)"' && echo $(SIGN_CERT) || echo -)
+
+# Creates the signing certificate in the login keychain unless it is there.
+# The grants given to earlier ad-hoc builds are reset once: they would
+# shadow those of the newly signed app. A failure leaves the build ad-hoc.
+signing-cert:
+	-@if security find-identity -p codesigning | grep -q '"$(SIGN_CERT)"'; then exit 0; fi; \
+	set -e; \
+	tmp=$$(mktemp -d); \
+	trap 'rm -f "$$tmp/cert.conf" "$$tmp/key.pem" "$$tmp/cert.pem" "$$tmp/cert.p12"; rmdir "$$tmp"' EXIT; \
+	printf '%s\n' '[req]' 'distinguished_name = dn' 'x509_extensions = ext' 'prompt = no' \
+		'[dn]' 'CN = $(SIGN_CERT)' \
+		'[ext]' 'basicConstraints = critical,CA:false' 'keyUsage = critical,digitalSignature' \
+		'extendedKeyUsage = critical,codeSigning' > "$$tmp/cert.conf"; \
+	/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$$tmp/cert.conf" \
+		-keyout "$$tmp/key.pem" -out "$$tmp/cert.pem"; \
+	/usr/bin/openssl pkcs12 -export -inkey "$$tmp/key.pem" -in "$$tmp/cert.pem" \
+		-name $(SIGN_CERT) -out "$$tmp/cert.p12" -passout pass:$(SIGN_CERT); \
+	security import "$$tmp/cert.p12" -k $(HOME)/Library/Keychains/login.keychain-db \
+		-P $(SIGN_CERT) -T /usr/bin/codesign; \
+	tccutil reset Accessibility local.wtf.app; \
+	tccutil reset Microphone local.wtf.app; \
+	echo "Created the $(SIGN_CERT) signing certificate; grant the permissions once more."
 
 # Production build: wtf.app with the frontend dist embedded and ASR on the
 # GPU via Metal.
-build: npm-install
+build: npm-install signing-cert
 	npm run tauri build -- --features prod,asr-metal \
 		--config '{"bundle":{"macOS":{"signingIdentity":"$(SIGN_IDENTITY)"}}}'
 else
