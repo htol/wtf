@@ -22,8 +22,14 @@ UNAME_S := $(shell uname -s)
 npm-install:
 	npm install
 
+ifeq ($(UNAME_S),Darwin)
+# Metal ships with macOS, so the dev build runs whisper on the GPU too.
+dev: npm-install
+	npm run tauri dev -- --features asr-metal
+else
 dev: npm-install
 	npm run tauri dev
+endif
 
 ifeq ($(UNAME_S),Darwin)
 # Production build: wtf.app with the frontend dist embedded and ASR on the

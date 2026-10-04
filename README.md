@@ -67,7 +67,7 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
   recording. The bundle is ad-hoc signed, so macOS may ask for both again
   after a rebuild.
 - `make dev` runs unbundled: the permissions then belong to the terminal
-  that started it.
+  that started it. Unlike on Linux, it runs whisper on the GPU (Metal).
 - Qwen3-ASR downloads the pinned llama.cpp Metal build instead of the
   Vulkan one.
 
