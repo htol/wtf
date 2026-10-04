@@ -165,8 +165,64 @@ where
 		.map_err(|e| e.to_string())
 }
 
+/// Opens and starts an input stream on the default device at its native
+/// rate. Returns the stream and that rate.
+fn open_default_input(
+	samples: Arc<Mutex<Vec<f32>>>,
+	level: Arc<AtomicU32>,
+) -> Result<(cpal::Stream, u32), String> {
+	use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+	let host = cpal::default_host();
+	let device = host
+		.default_input_device()
+		.ok_or("no default input device")?;
+	let supported = device.default_input_config().map_err(|e| e.to_string())?;
+	let channels = supported.channels();
+	let sample_rate = supported.sample_rate();
+	let config = cpal::StreamConfig {
+		channels,
+		sample_rate,
+		buffer_size: cpal::BufferSize::Default,
+	};
+	// Dispatch over the runtime sample format to the generic stream
+	// builder; one arm per `SampleFormat` variant.
+	macro_rules! open {
+		($sample:ty) => {
+			open_stream::<$sample>(
+				&device,
+				&config,
+				Arc::clone(&samples),
+				Arc::clone(&level),
+				channels as usize,
+			)
+		};
+	}
+	let stream = match supported.sample_format() {
+		cpal::SampleFormat::F32 => open!(f32),
+		cpal::SampleFormat::F64 => open!(f64),
+		cpal::SampleFormat::I8 => open!(i8),
+		cpal::SampleFormat::I16 => open!(i16),
+		cpal::SampleFormat::I32 => open!(i32),
+		cpal::SampleFormat::I64 => open!(i64),
+		cpal::SampleFormat::U8 => open!(u8),
+		cpal::SampleFormat::U16 => open!(u16),
+		cpal::SampleFormat::U32 => open!(u32),
+		cpal::SampleFormat::U64 => open!(u64),
+		cpal::SampleFormat::I24 => open!(cpal::I24),
+		_ => return Err("unsupported input sample format".into()),
+	}?;
+	stream.play().map_err(|e| e.to_string())?;
+	Ok((stream, sample_rate.0))
+}
+
 pub struct Recorder {
-	stream: cpal::Stream,
+	/// Dropping the sender ends the capture thread.
+	stop: std::sync::mpsc::Sender<()>,
+	/// Owns the cpal stream: a stream is not `Send` on every platform
+	/// (CoreAudio), while `Recorder` lives in app state shared across
+	/// threads.
+	thread: std::thread::JoinHandle<()>,
 	samples: Arc<Mutex<Vec<f32>>>,
 	level: Arc<AtomicU32>,
 	sample_rate: u32,
@@ -175,55 +231,34 @@ pub struct Recorder {
 impl Recorder {
 	/// Starts capturing from the default input device at its native rate.
 	pub fn start() -> Result<Self, String> {
-		use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-		let host = cpal::default_host();
-		let device = host
-			.default_input_device()
-			.ok_or("no default input device")?;
-		let supported = device.default_input_config().map_err(|e| e.to_string())?;
-		let channels = supported.channels();
-		let sample_rate = supported.sample_rate();
-		let config = cpal::StreamConfig {
-			channels,
-			sample_rate,
-			buffer_size: cpal::BufferSize::Default,
-		};
 		let samples = Arc::new(Mutex::new(Vec::new()));
 		let level = Arc::new(AtomicU32::new(0));
-		// Dispatch over the runtime sample format to the generic stream
-		// builder; one arm per `SampleFormat` variant.
-		macro_rules! open {
-			($sample:ty) => {
-				open_stream::<$sample>(
-					&device,
-					&config,
-					Arc::clone(&samples),
-					Arc::clone(&level),
-					channels as usize,
-				)
-			};
-		}
-		let stream = match supported.sample_format() {
-			cpal::SampleFormat::F32 => open!(f32),
-			cpal::SampleFormat::F64 => open!(f64),
-			cpal::SampleFormat::I8 => open!(i8),
-			cpal::SampleFormat::I16 => open!(i16),
-			cpal::SampleFormat::I32 => open!(i32),
-			cpal::SampleFormat::I64 => open!(i64),
-			cpal::SampleFormat::U8 => open!(u8),
-			cpal::SampleFormat::U16 => open!(u16),
-			cpal::SampleFormat::U32 => open!(u32),
-			cpal::SampleFormat::U64 => open!(u64),
-			cpal::SampleFormat::I24 => open!(cpal::I24),
-			_ => return Err("unsupported input sample format".into()),
-		}?;
-		stream.play().map_err(|e| e.to_string())?;
+		let (stop, stopped) = std::sync::mpsc::channel::<()>();
+		let (opened_tx, opened) = std::sync::mpsc::channel();
+		let thread = {
+			let samples = Arc::clone(&samples);
+			let level = Arc::clone(&level);
+			std::thread::spawn(move || match open_default_input(samples, level) {
+				Ok((stream, sample_rate)) => {
+					let _ = opened_tx.send(Ok(sample_rate));
+					// Returns once `Recorder` drops the sender.
+					let _ = stopped.recv();
+					drop(stream);
+				}
+				Err(e) => {
+					let _ = opened_tx.send(Err(e));
+				}
+			})
+		};
+		let sample_rate = opened
+			.recv()
+			.map_err(|_| "audio capture thread died".to_string())??;
 		Ok(Self {
-			stream,
+			stop,
+			thread,
 			samples,
 			level,
-			sample_rate: sample_rate.0,
+			sample_rate,
 		})
 	}
 
@@ -234,7 +269,8 @@ impl Recorder {
 
 	/// Stops recording and returns captured samples at 16 kHz mono f32.
 	pub fn stop(self) -> Result<Vec<f32>, String> {
-		drop(self.stream);
+		drop(self.stop);
+		let _ = self.thread.join();
 		let mut buffer = self.samples.lock().unwrap();
 		let samples = std::mem::take(&mut *buffer);
 		Ok(resample(&samples, self.sample_rate, SAMPLE_RATE))
