@@ -85,7 +85,11 @@ impl Default for Settings {
 			overlay_x: 0.5,
 			// DESIGN.md: initial indicator position = 20% from bottom.
 			overlay_y: 0.8,
+			#[cfg(not(target_os = "macos"))]
 			silence_peak: 0.1,
+			// Speech through a Mac's built-in microphone peaks at 0.04-0.08.
+			#[cfg(target_os = "macos")]
+			silence_peak: 0.02,
 			start_hidden: false,
 			#[cfg(target_os = "macos")]
 			record_shortcut: "Alt+Backquote".into(),
