@@ -111,6 +111,10 @@ pub fn run() {
 		// focus on map is the compositor's job (Hyprland: no_initial_focus rule).
 		pipeline::prime_overlay(app.handle());
 			spawn_hotkeys(app.handle().clone());
+			// Ask for the paste permission at launch rather than after the
+			// first dictation has already failed to paste.
+			#[cfg(target_os = "macos")]
+			inject::request_accessibility();
 			// With start_hidden the settings window stays in the tray at launch;
 			// setup runs before the event loop maps the window, so it never
 			// flashes. The tray menu and single-instance handler show it.

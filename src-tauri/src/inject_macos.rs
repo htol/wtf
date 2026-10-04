@@ -21,17 +21,61 @@ const FLAG_COMMAND: u64 = 1 << 20;
 /// kCGHIDEventTap.
 const HID_EVENT_TAP: u32 = 0;
 
+/// A CoreFoundation struct that is only ever passed by address.
+#[repr(C)]
+struct Opaque {
+	_private: [u8; 0],
+}
+
 #[link(name = "ApplicationServices", kind = "framework")]
+#[allow(non_upper_case_globals)]
 extern "C" {
-	fn AXIsProcessTrusted() -> u8;
+	fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
+	static kAXTrustedCheckOptionPrompt: *const c_void;
 	fn CGEventCreateKeyboardEvent(source: *const c_void, key: u16, key_down: bool) -> *mut c_void;
 	fn CGEventSetFlags(event: *mut c_void, flags: u64);
 	fn CGEventPost(tap: u32, event: *mut c_void);
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
+#[allow(non_upper_case_globals)]
 extern "C" {
+	static kCFBooleanTrue: *const c_void;
+	static kCFTypeDictionaryKeyCallBacks: Opaque;
+	static kCFTypeDictionaryValueCallBacks: Opaque;
+	fn CFDictionaryCreate(
+		allocator: *const c_void,
+		keys: *const *const c_void,
+		values: *const *const c_void,
+		count: isize,
+		key_callbacks: *const Opaque,
+		value_callbacks: *const Opaque,
+	) -> *const c_void;
 	fn CFRelease(object: *const c_void);
+}
+
+/// Whether the app may post keyboard events. While it may not, macOS shows
+/// its dialog that leads to the Accessibility list in System Settings and
+/// adds the app to that list.
+pub fn request_accessibility() -> bool {
+	unsafe {
+		let keys = [kAXTrustedCheckOptionPrompt];
+		let values = [kCFBooleanTrue];
+		let options = CFDictionaryCreate(
+			std::ptr::null(),
+			keys.as_ptr(),
+			values.as_ptr(),
+			1,
+			std::ptr::addr_of!(kCFTypeDictionaryKeyCallBacks),
+			std::ptr::addr_of!(kCFTypeDictionaryValueCallBacks),
+		);
+		if options.is_null() {
+			return false;
+		}
+		let trusted = AXIsProcessTrustedWithOptions(options) != 0;
+		CFRelease(options);
+		trusted
+	}
 }
 
 /// pbcopy/pbpaste pick the text encoding from the locale, and an app
@@ -72,7 +116,7 @@ fn set_clipboard(text: &str) -> Result<(), String> {
 
 fn press_paste() -> Result<(), String> {
 	// Without the permission the events are dropped silently.
-	if unsafe { AXIsProcessTrusted() } == 0 {
+	if !request_accessibility() {
 		return Err(
 			"no Accessibility permission: allow wtf in System Settings, Privacy & Security, Accessibility"
 				.into(),
