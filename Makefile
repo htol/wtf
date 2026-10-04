@@ -32,10 +32,17 @@ dev: npm-install
 endif
 
 ifeq ($(UNAME_S),Darwin)
+# macOS ties the microphone and Accessibility grants to the code signature.
+# An ad-hoc signature ("-") changes with every build and loses them; a
+# self-signed "wtf-dev" certificate in the keychain keeps them (README,
+# macOS).
+SIGN_IDENTITY ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"wtf-dev"' && echo wtf-dev || echo -)
+
 # Production build: wtf.app with the frontend dist embedded and ASR on the
 # GPU via Metal.
 build: npm-install
-	npm run tauri build -- --features prod,asr-metal
+	npm run tauri build -- --features prod,asr-metal \
+		--config '{"bundle":{"macOS":{"signingIdentity":"$(SIGN_IDENTITY)"}}}'
 else
 # Production build: embed the frontend dist into the binary and run ASR on
 # the GPU via Vulkan — any vendor driver (RADV, NVIDIA proprietary, ...);
