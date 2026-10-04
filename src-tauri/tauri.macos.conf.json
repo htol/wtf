@@ -4,7 +4,8 @@
 		"targets": ["app"],
 		"icon": ["icons/icon.png"],
 		"macOS": {
-			"signingIdentity": "-"
+			"signingIdentity": "-",
+			"entitlements": "Entitlements.plist"
 		}
 	}
 }
