@@ -4,6 +4,7 @@
 	"version": "0.1.0",
 	"identifier": "local.wtf.app",
 	"app": {
+		"macOSPrivateApi": true,
 		"windows": [
 			{
 				"label": "overlay",

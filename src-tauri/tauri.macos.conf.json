@@ -1,0 +1,10 @@
+{
+	"bundle": {
+		"active": true,
+		"targets": ["app"],
+		"icon": ["icons/icon.png"],
+		"macOS": {
+			"signingIdentity": "-"
+		}
+	}
+}

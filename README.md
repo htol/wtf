@@ -52,6 +52,23 @@ first build downloads a prebuilt libonnxruntime (cargo feature
   excludeApps=wtf
   ```
 
+## macOS
+
+`make build` produces `src-tauri/target/release/bundle/macos/wtf.app`
+(whisper on the GPU via Metal), `make install` copies it to
+`~/Applications`. `make smoke` and `make enable` are Linux only.
+
+- Shortcuts are set in Settings, Shortcuts (default: Option+` toggles
+  recording); there is no system binding dialog.
+- Pasting sends Cmd+V and needs the Accessibility permission (System
+  Settings, Privacy & Security); the microphone prompt appears on the first
+  recording. The bundle is ad-hoc signed, so macOS may ask for both again
+  after a rebuild.
+- `make dev` runs unbundled: the permissions then belong to the terminal
+  that started it.
+- Qwen3-ASR downloads the pinned llama.cpp Metal build instead of the
+  Vulkan one.
+
 ## Wayland notes
 
 - The recording overlay needs a KWin window rule: xdg-shell has no

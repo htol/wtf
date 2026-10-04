@@ -10,6 +10,11 @@ UNIT_DIR := $(HOME)/.config/systemd/user
 DESKTOP_DIR := $(HOME)/.local/share/applications
 ICON_DIR := $(HOME)/.local/share/icons/hicolor/128x128/apps
 RELEASE_BIN := src-tauri/target/release/$(BIN_NAME)
+# macOS: the app is built and installed as a bundle (the microphone
+# permission needs its Info.plist).
+APP_BUNDLE := src-tauri/target/release/bundle/macos/$(BIN_NAME).app
+INSTALL_APP := $(HOME)/Applications/$(BIN_NAME).app
+UNAME_S := $(shell uname -s)
 
 .PHONY: dev build smoke install enable check clean npm-install
 
@@ -19,12 +24,19 @@ npm-install:
 dev: npm-install
 	npm run tauri dev
 
+ifeq ($(UNAME_S),Darwin)
+# Production build: wtf.app with the frontend dist embedded and ASR on the
+# GPU via Metal.
+build: npm-install
+	npm run tauri build -- --features prod,asr-metal
+else
 # Production build: embed the frontend dist into the binary and run ASR on
 # the GPU via Vulkan — any vendor driver (RADV, NVIDIA proprietary, ...);
 # runtime device pick via settings.gpu_device.
 build: npm-install
 	npm run build
 	cargo build --release --manifest-path src-tauri/Cargo.toml --features prod,asr-vulkan
+endif
 
 # Validates that cuda + vulkan backends link into one binary (DESIGN.md risk #1).
 smoke: npm-install
@@ -34,6 +46,12 @@ smoke: npm-install
 check:
 	cargo check --manifest-path src-tauri/Cargo.toml
 
+ifeq ($(UNAME_S),Darwin)
+install: build
+	mkdir -p $(HOME)/Applications
+	ditto $(APP_BUNDLE) $(INSTALL_APP)
+	@echo "Installed $(INSTALL_APP)"
+else
 install: build
 	install -Dm755 $(RELEASE_BIN) $(INSTALL_BIN)
 	install -Dm644 assets/$(UNIT_NAME) $(UNIT_DIR)/$(UNIT_NAME)
@@ -44,6 +62,7 @@ install: build
 	-rm -f $(UNIT_DIR)/$(OLD_UNIT_NAME)
 	systemctl --user daemon-reload
 	@echo "Installed. Start it (now + on login) with: make enable"
+endif
 
 enable:
 	systemctl --user enable --now $(UNIT_NAME)

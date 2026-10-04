@@ -14,6 +14,8 @@ prod = ["tauri/custom-protocol"]
 asr = ["dep:whisper-rs"]
 asr-cuda = ["asr", "whisper-rs/cuda"]
 asr-vulkan = ["asr", "whisper-rs/vulkan", "dep:ash"]
+# macOS GPU backend.
+asr-metal = ["asr", "whisper-rs/metal"]
 
 [lib]
 name = "wtf_lib"
@@ -23,13 +25,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# macos-private-api: the transparent overlay window on macOS (pairs with
+# `macOSPrivateApi` in tauri.conf.json); no effect elsewhere.
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 # Exit early when a second instance is launched (Plasma session restore
 # relaunches the app at login alongside the systemd user unit).
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }
 cpal = "0.16"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # HTTP is only used for model downloads from huggingface.co; tokio::fs for
@@ -49,6 +52,14 @@ ash = { version = "0.38.0", features = ["loaded"], optional = true }
 ort = "=2.0.0-rc.13"
 # Qwen3-ASR engine: recordings go to llama-server as base64 WAV.
 base64 = "0.22"
+
+# Global shortcuts and the notification go through xdg-desktop-portal.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }
+
+# macOS has no portal: shortcuts are registered by the app itself.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-global-shortcut = "2"
 
 [profile.release]
 strip = true

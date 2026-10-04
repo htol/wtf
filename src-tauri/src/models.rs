@@ -506,13 +506,28 @@ pub fn delete_qwen_model(app: tauri::AppHandle, model_id: String) -> Result<(), 
 
 // --- llama.cpp runtime (runs Qwen3-ASR; see DESIGN.md "Engines") ---
 
-/// Pinned llama.cpp release: its prebuilt Vulkan build is unpacked under
-/// the data dir and run as `llama-server` (see qwen.rs).
+/// Pinned llama.cpp release: its prebuilt GPU build (Vulkan on Linux, Metal
+/// on macOS) is unpacked under the data dir and run as `llama-server` (see
+/// qwen.rs).
 const LLAMA_BUILD: &str = "b11381";
 
-/// sha256 of that release's `bin-ubuntu-vulkan-x64` archive.
-const LLAMA_ARCHIVE_SHA256: &str =
-	"6f93bf4138e9ad6a380ff605be1fd5108a66ec1977218eb74613f90634e18c64";
+/// That release's archive for this platform: the `bin-{name}` part of the
+/// asset name and the sha256 of the archive.
+#[cfg(target_os = "linux")]
+const LLAMA_ARCHIVE: (&str, &str) = (
+	"ubuntu-vulkan-x64",
+	"6f93bf4138e9ad6a380ff605be1fd5108a66ec1977218eb74613f90634e18c64",
+);
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const LLAMA_ARCHIVE: (&str, &str) = (
+	"macos-arm64",
+	"ea92f83904a1a1d76752581acbb87c7099ae1a3ac37cc6a634b1648d707dc341",
+);
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const LLAMA_ARCHIVE: (&str, &str) = (
+	"macos-x64",
+	"d993694972f639b1cfb18633cab66f775d055f15af370f352555c2f1f686e2e9",
+);
 
 fn llama_dir() -> PathBuf {
 	app_id::data_dir().join("llama")
@@ -533,12 +548,13 @@ pub async fn ensure_llama_runtime() -> Result<PathBuf, String> {
 	let dir = llama_dir();
 	std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 	let archive = dir.join(format!("llama-{LLAMA_BUILD}.tar.gz"));
+	let (name, sha256) = LLAMA_ARCHIVE;
 	let url = format!(
-		"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/llama-{LLAMA_BUILD}-bin-ubuntu-vulkan-x64.tar.gz"
+		"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/llama-{LLAMA_BUILD}-bin-{name}.tar.gz"
 	);
 	download_file(&url, &archive).await?;
 	let unpacked = sha256_file(&archive).and_then(|hash| {
-		if hash != LLAMA_ARCHIVE_SHA256 {
+		if hash != sha256 {
 			return Err(format!("llama.cpp archive has an unexpected sha256: {hash}"));
 		}
 		let status = std::process::Command::new("tar")
@@ -576,15 +592,20 @@ pub fn delete_model(app: tauri::AppHandle, model_id: String) -> Result<(), Strin
 	Ok(())
 }
 
+#[cfg(target_os = "linux")]
+const OPEN_COMMAND: &str = "xdg-open";
+#[cfg(target_os = "macos")]
+const OPEN_COMMAND: &str = "open";
+
 /// Opens the models directory in the desktop file manager.
 #[tauri::command]
 pub fn open_models_dir() -> Result<(), String> {
 	let dir = app_id::models_dir();
 	std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-	std::process::Command::new("xdg-open")
+	std::process::Command::new(OPEN_COMMAND)
 		.arg(&dir)
 		.spawn()
-		.map_err(|e| format!("xdg-open: {e}"))?;
+		.map_err(|e| format!("{OPEN_COMMAND}: {e}"))?;
 	Ok(())
 }
 

@@ -56,6 +56,13 @@ pub struct Settings {
 	/// tray and "Open wtf" (tray menu, second-instance handler) brings the
 	/// window back.
 	pub start_hidden: bool,
+	/// Global shortcut that toggles recording, e.g. "Alt+Backquote"; empty =
+	/// unbound. macOS only: on Linux the desktop portal owns the bindings.
+	#[cfg(target_os = "macos")]
+	pub record_shortcut: String,
+	/// Global shortcut for the `cycle-language` action; empty = unbound.
+	#[cfg(target_os = "macos")]
+	pub cycle_language_shortcut: String,
 }
 
 impl Default for Settings {
@@ -80,6 +87,10 @@ impl Default for Settings {
 			overlay_y: 0.8,
 			silence_peak: 0.1,
 			start_hidden: false,
+			#[cfg(target_os = "macos")]
+			record_shortcut: "Alt+Backquote".into(),
+			#[cfg(target_os = "macos")]
+			cycle_language_shortcut: String::new(),
 		}
 	}
 }

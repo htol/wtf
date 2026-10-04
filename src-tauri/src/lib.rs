@@ -9,7 +9,15 @@ mod asr;
 mod audio;
 mod gigaam;
 mod history;
+#[cfg(target_os = "linux")]
 mod hotkey;
+#[cfg(target_os = "macos")]
+#[path = "hotkey_macos.rs"]
+mod hotkey;
+#[cfg(target_os = "linux")]
+mod inject;
+#[cfg(target_os = "macos")]
+#[path = "inject_macos.rs"]
 mod inject;
 mod models;
 mod pipeline;
@@ -18,9 +26,34 @@ mod settings;
 mod tray;
 mod vad;
 
-/// Registers the global shortcuts and forwards every activation into the
-/// app as a `shortcut` event (payload: shortcut id). Runs on the tauri
-/// (tokio) runtime for the lifetime of the daemon.
+/// Handles one global shortcut activation: `record` toggles the pipeline,
+/// and every activation reaches the frontend as a `shortcut` event
+/// (payload: shortcut id).
+fn on_shortcut(app: &tauri::AppHandle, id: &str) {
+	eprintln!("hotkey activated: {id}");
+	if id == hotkey::SHORTCUT_RECORD {
+		pipeline::toggle_record(app);
+	}
+	let _ = tauri::Emitter::emit(app, "shortcut", id.to_string());
+}
+
+/// Registers the shortcuts from settings; activations arrive on the main
+/// thread through the global-shortcut plugin.
+#[cfg(target_os = "macos")]
+fn spawn_hotkeys(app: tauri::AppHandle) {
+	let registered = app
+		.plugin(tauri_plugin_global_shortcut::Builder::new().build())
+		.map_err(|e| e.to_string())
+		.and_then(|()| hotkey::register(&app));
+	if let Err(e) = registered {
+		eprintln!("hotkey: registration failed: {e}");
+	}
+}
+
+/// Registers the global shortcuts and forwards every activation to
+/// `on_shortcut`. Runs on the tauri (tokio) runtime for the lifetime of the
+/// daemon.
+#[cfg(target_os = "linux")]
 fn spawn_hotkeys(app: tauri::AppHandle) {
 	tauri::async_runtime::spawn(async move {
 		use tauri::Manager;
@@ -33,14 +66,7 @@ fn spawn_hotkeys(app: tauri::AppHandle) {
 		};
 		let hub = std::sync::Arc::new(hotkeys);
 		app.manage(hub.clone());
-		let app_for_record = app.clone();
-		let emit = |id: &str| {
-			eprintln!("hotkey activated: {id}");
-			if id == hotkey::SHORTCUT_RECORD {
-				pipeline::toggle_record(&app_for_record);
-			}
-			let _ = tauri::Emitter::emit(&app, "shortcut", id.to_string());
-		};
+		let emit = |id: &str| on_shortcut(&app, id);
 		if let Err(e) = hotkey::listen(&hub.globals, emit).await {
 			eprintln!("hotkey: activation stream ended: {e}");
 		}

@@ -17,6 +17,10 @@
 		overlay_x: number;
 		overlay_y: number;
 		start_hidden: boolean;
+		// macOS only: on Linux the desktop portal owns the bindings and the
+		// backend sends no such fields.
+		record_shortcut?: string;
+		cycle_language_shortcut?: string;
 	}
 
 	interface ModelInfo {
@@ -106,7 +110,9 @@
 			settings.gigaam_model_id,
 			settings.qwen_model_id,
 			settings.silence_peak,
-			settings.start_hidden
+			settings.start_hidden,
+			settings.record_shortcut,
+			settings.cycle_language_shortcut
 		]);
 	}
 
@@ -153,6 +159,8 @@
 		current.qwen_model_id = settings.qwen_model_id;
 		current.silence_peak = settings.silence_peak;
 		current.start_hidden = settings.start_hidden;
+		current.record_shortcut = settings.record_shortcut;
+		current.cycle_language_shortcut = settings.cycle_language_shortcut;
 		await invoke('set_settings', { settings: current });
 		// Everything just written matches disk again (model/GPU pickers
 		// persist through this same path).
@@ -254,6 +262,18 @@
 	async function rebind() {
 		rebindResult = null;
 		try {
+			await invoke('rebind_shortcuts');
+			rebindResult = 'bound';
+		} catch (e) {
+			rebindResult = `${e}`;
+		}
+	}
+
+	// macOS: the bindings are plain settings; save them, then re-register.
+	async function applyShortcuts() {
+		rebindResult = null;
+		try {
+			await persistOwn();
 			await invoke('rebind_shortcuts');
 			rebindResult = 'bound';
 		} catch (e) {
@@ -562,6 +582,25 @@
 						(Vulkan), downloaded with the first model. Prompts are not supported.
 					</p>
 					{@render modelCards('qwen')}
+				</section>
+			{:else if settings.record_shortcut !== undefined}
+				<section>
+					<label>
+						Toggle recording
+						<input type="text" bind:value={settings.record_shortcut} />
+					</label>
+					<label>
+						Cycle language
+						<input type="text" bind:value={settings.cycle_language_shortcut} />
+					</label>
+					<p class="hint">
+						Modifiers and a key joined with "+", e.g. Alt+Backquote or Cmd+Shift+KeyD.
+						Leave a field empty to keep that action unbound.
+					</p>
+					<div class="row">
+						<button type="button" onclick={() => applyShortcuts()}>Apply shortcuts</button>
+						{#if rebindResult}<span class="muted">{rebindResult}</span>{/if}
+					</div>
 				</section>
 			{:else}
 				<section>

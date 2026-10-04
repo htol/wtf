@@ -108,6 +108,21 @@ pub fn prime_overlay(app: &tauri::AppHandle) {
 	};
 	let _ = window.set_focusable(false);
 	let _ = window.set_always_on_top(true);
+	// macOS has no compositor rule to place the overlay: restore the saved
+	// position (fractions of the monitor, see Overlay.svelte) and follow the
+	// user across Spaces.
+	#[cfg(target_os = "macos")]
+	{
+		let _ = window.set_visible_on_all_workspaces(true);
+		if let Ok(Some(monitor)) = window.primary_monitor() {
+			let settings = settings::load();
+			let size = monitor.size();
+			let _ = window.set_position(tauri::PhysicalPosition::new(
+				settings.overlay_x * size.width as f64,
+				settings.overlay_y * size.height as f64,
+			));
+		}
+	}
 }
 
 /// Maps the overlay at its recording size (260x30 from the window config).
@@ -216,6 +231,9 @@ fn no_model(app: &tauri::AppHandle, message: &str) -> String {
 	message.to_string()
 }
 
+const GIGAAM_SUGGESTION: &str =
+	"Russian dictation can use the GigaAM engine - download it in Settings, Model section.";
+
 /// One-time-per-session desktop notification: Russian dictation could use
 /// the GigaAM engine (DESIGN.md "Engines"). Fire-and-forget: portal
 /// notification failures only cost the suggestion.
@@ -225,13 +243,18 @@ fn suggest_gigaam_download(app: &tauri::AppHandle) {
 		return;
 	}
 	let _ = app.emit("gigaam-suggest", ());
+	#[cfg(target_os = "macos")]
+	let _ = std::process::Command::new("osascript")
+		.args(["-e", &format!("display notification \"{GIGAAM_SUGGESTION}\" with title \"wtf\"")])
+		.status();
+	#[cfg(target_os = "linux")]
 	tauri::async_runtime::spawn(async move {
 		use ashpd::desktop::notification::NotificationProxy;
 		let Ok(proxy) = NotificationProxy::new().await else {
 			return;
 		};
 		let notification = ashpd::desktop::notification::Notification::new("wtf")
-			.body("Russian dictation can use the GigaAM engine - download it in Settings, Model section.");
+			.body(GIGAAM_SUGGESTION);
 		let _ = proxy.add_notification("wtf-gigaam-suggest", notification).await;
 	});
 }
