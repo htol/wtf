@@ -19,7 +19,7 @@ UNAME_S := $(shell uname -s)
 # Keep in sync with "identifier" in src-tauri/tauri.conf.json.
 BUNDLE_ID := htol.wtf
 
-.PHONY: dev build smoke install enable check clean npm-install signing-cert
+.PHONY: dev build smoke install enable check clean npm-install signing-cert purge-old-id
 
 npm-install:
 	npm install
@@ -113,6 +113,25 @@ enable:
 else
 enable:
 	systemctl --user enable --now $(UNIT_NAME)
+endif
+
+# Removes what the previous identifier, local.wtf.app, left behind: the
+# webview data and caches kept per identifier and, on macOS, the privacy
+# grants. Settings, history and models live under "wtf" and are not touched.
+ifeq ($(UNAME_S),Darwin)
+purge-old-id:
+	-tccutil reset All local.wtf.app
+	rm -rf "$(HOME)/Library/WebKit/local.wtf.app"
+	rm -rf "$(HOME)/Library/Caches/local.wtf.app"
+	rm -rf "$(HOME)/Library/HTTPStorages/local.wtf.app"
+	rm -f "$(HOME)/Library/HTTPStorages/local.wtf.app.binarycookies"
+	rm -rf "$(HOME)/Library/Application Support/local.wtf.app"
+	rm -rf "$(HOME)/Library/Saved Application State/local.wtf.app.savedState"
+	rm -f "$(HOME)/Library/Preferences/local.wtf.app.plist"
+else
+purge-old-id:
+	rm -rf "$(HOME)/.local/share/local.wtf.app"
+	rm -rf "$(HOME)/.cache/local.wtf.app"
 endif
 
 clean:
