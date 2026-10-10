@@ -155,6 +155,7 @@ pub fn run() {
 			inject::copy_to_clipboard,
 			audio::list_input_devices,
 			asr::list_gpu_devices,
+			qwen::list_qwen_devices,
 			hotkey::rebind_shortcuts,
 			pipeline::unload_model
 		])

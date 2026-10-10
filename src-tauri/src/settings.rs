@@ -43,6 +43,15 @@ pub struct Settings {
 	/// Chosen Qwen3-ASR model id (see models::QWEN_CHOICES); None = most
 	/// recent download in the qwen subdir.
 	pub qwen_model_id: Option<String>,
+	/// Run Qwen3-ASR on a GPU; false = CPU only.
+	pub qwen_use_gpu: bool,
+	/// llama.cpp device name for Qwen3-ASR (see qwen::list_qwen_devices),
+	/// e.g. "Vulkan0"; None = llama.cpp's default pick.
+	pub qwen_gpu_device: Option<String>,
+	/// Qwen3-ASR context size in tokens; bounds the recording length
+	/// (~13 audio tokens per second plus the transcript) and sizes the KV
+	/// cache.
+	pub qwen_context: u32,
 	/// Named initial prompts; `active_prompt` names the one in use (None = off).
 	pub prompts: Vec<NamedPrompt>,
 	pub active_prompt: Option<String>,
@@ -82,6 +91,10 @@ impl Default for Settings {
 			model_id: None,
 			gigaam_model_id: None,
 			qwen_model_id: None,
+			qwen_use_gpu: true,
+			qwen_gpu_device: None,
+			// ~8 minutes of speech, ~0.9 GB of f16 KV cache.
+			qwen_context: 8192,
 			prompts: vec![NamedPrompt {
 				name: "ru-en mix".into(),
 				text: "Сегодня у нас meeting по архитектуре, я закинул PR и обновил roadmap. "
@@ -162,12 +175,16 @@ pub fn set_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), Str
 	{
 		crate::pipeline::unload_transcriber(&app);
 	} else {
-		// Only a GigaAM/Qwen3-ASR pick changed: drop that engine, keep the
-		// others cached.
+		// Only a GigaAM/Qwen3-ASR setting changed: drop that engine, keep
+		// the others cached.
 		if settings.gigaam_model_id != previous.gigaam_model_id {
 			crate::pipeline::unload_gigaam(&app);
 		}
-		if settings.qwen_model_id != previous.qwen_model_id {
+		if settings.qwen_model_id != previous.qwen_model_id
+			|| settings.qwen_use_gpu != previous.qwen_use_gpu
+			|| settings.qwen_gpu_device != previous.qwen_gpu_device
+			|| settings.qwen_context != previous.qwen_context
+		{
 			crate::pipeline::unload_qwen(&app);
 		}
 	}

@@ -334,10 +334,16 @@ fn load_qwen(slot: &mut Slot, model: &std::path::Path) -> Result<(), String> {
 	if slot.as_ref().is_some_and(|(path, _)| path == model) {
 		return Ok(());
 	}
+	let settings = settings::load();
 	eprintln!("loading qwen model {}...", model.display());
 	*slot = Some((
 		model.to_path_buf(),
-		asr::Transcriber::Qwen(crate::qwen::Qwen::new(model)?),
+		asr::Transcriber::Qwen(crate::qwen::Qwen::new(
+			model,
+			settings.qwen_use_gpu,
+			settings.qwen_gpu_device.as_deref(),
+			settings.qwen_context,
+		)?),
 	));
 	Ok(())
 }

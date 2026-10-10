@@ -13,6 +13,9 @@
 		model_id: string | null;
 		gigaam_model_id: string | null;
 		qwen_model_id: string | null;
+		qwen_use_gpu: boolean;
+		qwen_gpu_device: string | null;
+		qwen_context: number;
 		silence_peak: number;
 		overlay_x: number;
 		overlay_y: number;
@@ -37,6 +40,12 @@
 		index: number;
 		name: string;
 		pci_bus_id: string;
+	}
+
+	// A device of the llama.cpp runtime (Qwen3-ASR), in its own naming.
+	interface QwenDevice {
+		id: string;
+		name: string;
 	}
 
 	// A catalog card of the GigaAM or Qwen3-ASR engine.
@@ -87,6 +96,7 @@
 	let models = $state<ModelInfo[]>([]);
 	let cardModels = $state<Record<CardEngine, CardModelInfo[]>>({ gigaam: [], qwen: [] });
 	let gpus = $state<GpuDevice[]>([]);
+	let qwenDevices = $state<QwenDevice[]>([]);
 	let inputDevices = $state<string[]>([]);
 	let progress = $state<Record<string, DownloadProgress>>({});
 	// Snapshot of the persisted values this tab owns; divergence from the
@@ -112,6 +122,9 @@
 			settings.model_id,
 			settings.gigaam_model_id,
 			settings.qwen_model_id,
+			settings.qwen_use_gpu,
+			settings.qwen_gpu_device,
+			settings.qwen_context,
 			settings.silence_peak,
 			settings.start_hidden,
 			settings.preload_model,
@@ -162,6 +175,9 @@
 		current.model_id = settings.model_id;
 		current.gigaam_model_id = settings.gigaam_model_id;
 		current.qwen_model_id = settings.qwen_model_id;
+		current.qwen_use_gpu = settings.qwen_use_gpu;
+		current.qwen_gpu_device = settings.qwen_gpu_device;
+		current.qwen_context = settings.qwen_context;
 		current.silence_peak = settings.silence_peak;
 		current.start_hidden = settings.start_hidden;
 		current.preload_model = settings.preload_model;
@@ -184,6 +200,12 @@
 	async function pickGpu(index: number) {
 		if (!settings) return;
 		settings.gpu_device = index;
+		await persistOwn();
+	}
+
+	async function pickQwenDevice(id: string | null) {
+		if (!settings) return;
+		settings.qwen_gpu_device = id;
 		await persistOwn();
 	}
 
@@ -221,6 +243,8 @@
 		}
 		delete progress[id];
 		await refreshModels();
+		// The first Qwen3-ASR download installs the runtime that lists them.
+		if (engine === 'qwen') qwenDevices = await invoke<QwenDevice[]>('list_qwen_devices');
 	}
 
 	async function removeCard(engine: CardEngine, id: string) {
@@ -305,6 +329,7 @@
 			refreshModels();
 		});
 		invoke<GpuDevice[]>('list_gpu_devices').then((devices) => (gpus = devices));
+		invoke<QwenDevice[]>('list_qwen_devices').then((devices) => (qwenDevices = devices));
 		invoke<string[]>('list_input_devices').then((devices) => (inputDevices = devices));
 		const unlisten = listen<DownloadProgress>('model-download', (event) => {
 			progress[event.payload.id] = event.payload;
@@ -608,9 +633,45 @@
 			{:else if subTab === 'qwen'}
 				<section>
 					<p class="hint">
-						Multilingual with language detection; runs on the GPU via llama.cpp
-						(Vulkan), downloaded with the first model. Prompts are not supported.
+						Multilingual with language detection; runs via llama.cpp (Vulkan),
+						downloaded with the first model. Prompts are not supported.
 					</p>
+				</section>
+
+				<section>
+					<h2>Inference</h2>
+					<label>
+						<input type="checkbox" bind:checked={settings.qwen_use_gpu} />
+						Run inference on GPU
+					</label>
+					{#if qwenDevices.length > 0}
+						<label>
+							GPU device
+							<select
+								value={settings.qwen_gpu_device ?? ''}
+								disabled={!settings.qwen_use_gpu}
+								onchange={(e) => pickQwenDevice(e.currentTarget.value || null)}
+							>
+								<option value="">Default</option>
+								{#each qwenDevices as device (device.id)}
+									<option value={device.id}>{device.id} — {device.name}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
+					<label>
+						Context size (tokens)
+						<input type="number" min="1024" step="1024" bind:value={settings.qwen_context} />
+					</label>
+					<p class="hint">
+						Limits the recording length (~13 tokens per second of audio plus the
+						transcript) and sizes the KV cache (~110 KB per token). On an integrated
+						GPU the CPU is often faster.
+					</p>
+				</section>
+
+				<section>
+					<h2>Model</h2>
 					{@render modelCards('qwen')}
 				</section>
 			{:else if settings.record_shortcut !== undefined}

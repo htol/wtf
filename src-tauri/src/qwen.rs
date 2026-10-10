@@ -1,5 +1,5 @@
 //! Qwen3-ASR: the third ASR engine (see DESIGN.md, "Engines"). Multilingual
-//! with built-in language detection, on the GPU.
+//! with built-in language detection, on a GPU or the CPU.
 //!
 //! The model runs in a `llama-server` child process (llama.cpp, Vulkan
 //! build, installed by `models::ensure_llama_runtime`): llama.cpp cannot be
@@ -78,9 +78,16 @@ pub struct Qwen {
 
 impl Qwen {
 	/// `model_dir`: the directory holding one catalog entry's files (see
-	/// `models::QWEN_CHOICES`). Starts the server and waits until the model
-	/// is loaded.
-	pub fn new(model_dir: &Path) -> Result<Self, String> {
+	/// `models::QWEN_CHOICES`). `device`: a llama.cpp device name (see
+	/// `list_qwen_devices`), None = llama.cpp's default; ignored without
+	/// `use_gpu`. `context`: context size in tokens. Starts the server and
+	/// waits until the model is loaded.
+	pub fn new(
+		model_dir: &Path,
+		use_gpu: bool,
+		device: Option<&str>,
+		context: u32,
+	) -> Result<Self, String> {
 		let binary = crate::models::llama_server()
 			.ok_or("llama.cpp runtime is not installed: re-download the Qwen3-ASR model in settings")?;
 		let (model, mmproj) = crate::models::qwen_files(model_dir)
@@ -91,12 +98,18 @@ impl Qwen {
 			.map_err(|e| format!("cannot pick a port for llama-server: {e}"))?
 			.port();
 		let api_key = random_key()?;
-		let server = Command::new(&binary)
-			.arg("-m")
-			.arg(&model)
-			.arg("--mmproj")
-			.arg(&mmproj)
-			.args(["--gpu-layers", "all", "--host", "127.0.0.1", "--parallel", "1", "--no-webui"])
+		let mut command = Command::new(&binary);
+		command.arg("-m").arg(&model).arg("--mmproj").arg(&mmproj);
+		match (use_gpu, device) {
+			(true, Some(device)) => {
+				command.args(["--gpu-layers", "all", "--device", device, "--mmproj-device", device])
+			}
+			(true, None) => command.args(["--gpu-layers", "all"]),
+			(false, _) => command.args(["--device", "none", "--no-mmproj-offload"]),
+		};
+		let server = command
+			.args(["--ctx-size", &context.to_string()])
+			.args(["--host", "127.0.0.1", "--parallel", "1", "--no-webui"])
 			.args(["--port", &port.to_string()])
 			// In the environment rather than argv: argv is world-readable.
 			.env("LLAMA_API_KEY", &api_key)
@@ -199,6 +212,50 @@ impl Drop for Qwen {
 	}
 }
 
+/// A device the llama.cpp runtime can offload to: `id` is its name for
+/// `--device` (e.g. "Vulkan0"), `name` the description for display.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct QwenDevice {
+	pub id: String,
+	pub name: String,
+}
+
+/// The devices of the installed llama.cpp build, in its own naming: its
+/// order need not match whisper's `gpu_device` indices. Empty while the
+/// runtime is not installed.
+#[tauri::command]
+pub async fn list_qwen_devices() -> Vec<QwenDevice> {
+	let Some(binary) = crate::models::llama_server() else {
+		return Vec::new();
+	};
+	let output = tauri::async_runtime::spawn_blocking(move || {
+		Command::new(binary).arg("--list-devices").stdin(Stdio::null()).output()
+	})
+	.await;
+	match output {
+		Ok(Ok(output)) if output.status.success() => {
+			parse_devices(&String::from_utf8_lossy(&output.stdout))
+		}
+		_ => Vec::new(),
+	}
+}
+
+/// Parses `llama-server --list-devices`: a header line, then one
+/// `  <id>: <description>` line per device.
+fn parse_devices(listing: &str) -> Vec<QwenDevice> {
+	listing
+		.lines()
+		.filter(|line| line.starts_with(char::is_whitespace))
+		.filter_map(|line| {
+			let (id, name) = line.trim().split_once(": ")?;
+			Some(QwenDevice {
+				id: id.to_string(),
+				name: name.to_string(),
+			})
+		})
+		.collect()
+}
+
 /// Splits a detection-mode answer, `language <Name><asr_text>transcript`,
 /// into the transcript and the language code ("auto" for a name outside
 /// the table, e.g. `None` on non-speech audio).
@@ -265,6 +322,19 @@ mod tests {
 			parse_detected("language None<asr_text>").unwrap(),
 			(String::new(), "auto".to_string())
 		);
+	}
+
+	#[test]
+	fn device_listing_parses_into_ids_and_names() {
+		let listing = "Available devices:\n  Vulkan0: Intel(R) UHD Graphics 620 (WHL GT2) (11748 MiB, 8681 MiB free)\n";
+		assert_eq!(
+			parse_devices(listing),
+			vec![QwenDevice {
+				id: "Vulkan0".into(),
+				name: "Intel(R) UHD Graphics 620 (WHL GT2) (11748 MiB, 8681 MiB free)".into(),
+			}]
+		);
+		assert!(parse_devices("Available devices:\n").is_empty());
 	}
 
 	#[test]

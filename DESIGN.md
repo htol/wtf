@@ -20,7 +20,7 @@ Wayland. Stack: Rust, Tauri 2, whisper.cpp (whisper-rs), Svelte 5 + Vite, Nord.
 |----------|--------|-------|
 | Hotkey   | xdg-desktop-portal GlobalShortcuts via `ashpd` (feature `global_shortcuts`) | Plasma 6 native binding dialog; press-to-toggle |
 | Capture  | `cpal` in-process, default input device | resample to 16 kHz mono f32; risk: pipewire-alsa default routing — smoke test early |
-| ASR      | whisper (`whisper-rs`) + GigaAM (`ort`/ONNX Runtime) + Qwen3-ASR (`llama-server` child process), see "Engines" | whisper: features `cuda` + `vulkan` both enabled; runtime device pick via `WhisperContextParameters::gpu_device` (verified: whisper.cpp enumerates all registered GPU backends, whisper-rs passes the field through). GigaAM: CPU EP only. Qwen3-ASR: Vulkan |
+| ASR      | whisper (`whisper-rs`) + GigaAM (`ort`/ONNX Runtime) + Qwen3-ASR (`llama-server` child process), see "Engines" | whisper: features `cuda` + `vulkan` both enabled; runtime device pick via `WhisperContextParameters::gpu_device` (verified: whisper.cpp enumerates all registered GPU backends, whisper-rs passes the field through). GigaAM: CPU EP only. Qwen3-ASR: Vulkan or CPU, own settings (`qwen_use_gpu`, `qwen_gpu_device` as a llama.cpp device name — its order need not match whisper's indices) |
 | Paste    | clipboard + simulated Ctrl+V (`wl-copy`/`wl-paste` + `ydotool`), restore previous clipboard | works everywhere Ctrl+V works |
 | History  | SQLite (`rusqlite`, bundled), text + language + timestamp, kept forever | audio not stored |
 
@@ -58,14 +58,19 @@ Three ASR engines behind one seam (`asr::Transcriber`):
   `~/.local/share/wtf/llama/` together with the first model.
 - Qwen3-ASR internals (`qwen.rs`): the server starts on the first
   dictation — loopback port, per-process API key, one slot, all layers on
-  the GPU — and stops when the engine is dropped (`unload_model`, model
-  change); the systemd unit's cgroup covers an app crash. A recording is
+  the chosen GPU or none (`--device none`), explicit `--ctx-size`
+  (`qwen_context`, default 8192; without it llama.cpp starts from the
+  model's 65536 tokens; audio takes ~13 tokens/s) — and stops when the
+  engine is dropped (`unload_model`, model or Qwen setting change); the
+  systemd unit's cgroup covers an app crash. A recording is
   one chat request with a base64 WAV. The model answers
   `language <Name><asr_text><transcript>`; a chosen language pre-fills
   that prefix as the start of the assistant turn.
 - Qwen3-ASR measurements (RX 9070 XT, official GigaAM samples): 11 s of
   Russian in 0.33 s (0.6B) / 0.57 s (1.7B), 71 s in 1.6 s / 2.7 s, model
-  load ~1 s. Digital silence makes it hallucinate (Chinese text); the
+  load ~1 s. On an i7-8565U with UHD 620 the CPU beats the iGPU: 12.5 s of
+  speech end to end incl. load, 0.6B 7.3 s vs 11.0 s, 1.7B 17.9 s vs
+  31.4 s. Digital silence makes it hallucinate (Chinese text); the
   pipeline's silence guard runs before the engine. An earlier int4 ONNX
   build on the CPU (`ort`) was 8-13x slower and less accurate on Russian,
   and was replaced.
