@@ -100,15 +100,17 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 /// resize a mapped toplevel (`gtk_window_resize` is silently ignored after
 /// map — the compositor owns the size), so the overlay is shown/hidden
 /// instead of collapsed to 1x1. `set_focusable(false)` must run before the
-/// first `show()`; on Wayland first maps can activate the window, so the
-/// compositor config must keep it out of focus (Hyprland: `no_initial_focus`,
-/// KWin: `acceptfocus=false` rule).
+/// first `show()`. On Wayland the window becomes a layer-shell surface
+/// (see `overlay_layer`): a plain xdg toplevel has no way to refuse focus,
+/// stay on top or pick its position, and every map would activate it.
 pub fn prime_overlay(app: &tauri::AppHandle) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;
 	};
 	let _ = window.set_focusable(false);
 	let _ = window.set_always_on_top(true);
+	#[cfg(target_os = "linux")]
+	overlay_layer::init(&window);
 	// macOS has no compositor rule to place the overlay: restore the saved
 	// position (fractions of the monitor, see Overlay.svelte) and follow the
 	// user across Spaces.
@@ -126,10 +128,136 @@ pub fn prime_overlay(app: &tauri::AppHandle) {
 	}
 }
 
+/// Linux/Wayland: the overlay as a wlr-layer-shell surface. The compositor
+/// never gives it keyboard focus (`KeyboardMode::None`), keeps it in the
+/// overlay layer and places it by the margins the app sets — so no KWin or
+/// Hyprland window rules are needed and the map on each recording cannot
+/// steal focus from the dictation target. The position is kept as fractions
+/// of the monitor (`overlay_x`/`overlay_y`, shared with macOS); dragging the
+/// pill moves it through `shift_overlay`, since a layer surface cannot be
+/// moved by the compositor. On X11 the library reports no support and the
+/// window stays a plain toplevel.
+#[cfg(target_os = "linux")]
+mod overlay_layer {
+	use std::sync::atomic::{AtomicBool, Ordering};
+
+	use gtk::gdk;
+	use gtk::prelude::*;
+	use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+
+	use crate::settings;
+
+	static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+	pub fn active() -> bool {
+		ACTIVE.load(Ordering::Acquire)
+	}
+
+	/// Must run on the main thread before the window is first mapped:
+	/// gtk-layer-shell can only take over an unrealized GtkWindow.
+	pub fn init(window: &tauri::WebviewWindow) {
+		if !gtk_layer_shell::is_supported() {
+			return;
+		}
+		let Ok(gtk) = window.gtk_window() else {
+			return;
+		};
+		gtk.init_layer_shell();
+		gtk.set_namespace("wtf-overlay");
+		gtk.set_layer(Layer::Overlay);
+		gtk.set_keyboard_mode(KeyboardMode::None);
+		gtk.set_anchor(Edge::Left, true);
+		gtk.set_anchor(Edge::Top, true);
+		// Pin the surface to one output so the margins and the saved
+		// fractions refer to the same monitor.
+		if let Some(monitor) = default_monitor(&gtk) {
+			gtk.set_monitor(&monitor);
+			let settings = settings::load();
+			let geometry = monitor.geometry();
+			gtk.set_layer_shell_margin(
+				Edge::Left,
+				(settings.overlay_x * geometry.width() as f64) as i32,
+			);
+			gtk.set_layer_shell_margin(
+				Edge::Top,
+				(settings.overlay_y * geometry.height() as f64) as i32,
+			);
+		}
+		ACTIVE.store(true, Ordering::Release);
+	}
+
+	fn default_monitor(gtk: &gtk::ApplicationWindow) -> Option<gdk::Monitor> {
+		let display = gtk.display();
+		display.primary_monitor().or_else(|| display.monitor(0))
+	}
+
+	/// Moves the surface by `dx`/`dy` logical pixels, clamped to the
+	/// monitor, and optionally persists the new position as fractions.
+	pub fn shift(window: &tauri::WebviewWindow, dx: i32, dy: i32, persist: bool) {
+		let Ok(gtk) = window.gtk_window() else {
+			return;
+		};
+		let Some(monitor) = <gtk::ApplicationWindow as LayerShell>::monitor(&gtk).or_else(|| default_monitor(&gtk)) else {
+			return;
+		};
+		let geometry = monitor.geometry();
+		let (width, height) = gtk.size();
+		let max_x = (geometry.width() - width).max(0);
+		let max_y = (geometry.height() - height).max(0);
+		let x = (gtk.layer_shell_margin(Edge::Left) + dx).clamp(0, max_x);
+		let y = (gtk.layer_shell_margin(Edge::Top) + dy).clamp(0, max_y);
+		gtk.set_layer_shell_margin(Edge::Left, x);
+		gtk.set_layer_shell_margin(Edge::Top, y);
+		if persist {
+			let _ = settings::set_overlay_position(
+				x as f64 / geometry.width().max(1) as f64,
+				y as f64 / geometry.height().max(1) as f64,
+			);
+		}
+	}
+}
+
+/// Whether the overlay is a layer-shell surface (Linux/Wayland), in which
+/// case the overlay window moves itself through `shift_overlay` instead of
+/// the compositor's drag.
+#[tauri::command]
+pub fn overlay_is_layer() -> bool {
+	#[cfg(target_os = "linux")]
+	{
+		overlay_layer::active()
+	}
+	#[cfg(not(target_os = "linux"))]
+	{
+		false
+	}
+}
+
+/// Drag step from the overlay window (logical pixels); `persist` on the
+/// final step saves the position. No-op unless the overlay is a layer
+/// surface. GTK calls must run on the main thread.
+#[tauri::command]
+pub fn shift_overlay(app: tauri::AppHandle, dx: i32, dy: i32, persist: bool) {
+	#[cfg(target_os = "linux")]
+	{
+		if !overlay_layer::active() {
+			return;
+		}
+		let handle = app.clone();
+		let _ = app.run_on_main_thread(move || {
+			if let Some(window) = handle.get_webview_window("overlay") {
+				overlay_layer::shift(&window, dx, dy, persist);
+			}
+		});
+	}
+	#[cfg(not(target_os = "linux"))]
+	{
+		let _ = (app, dx, dy, persist);
+	}
+}
+
 /// Maps the overlay at its recording size (260x30 from the window config).
-/// Positioning is left to the compositor (KWin rule "Remember", Hyprland
-/// stores the last floating position): Wayland ignores client-side
-/// set_position.
+/// Positioning: layer-shell margins on Wayland (see `overlay_layer`), the
+/// saved position on macOS, the window manager elsewhere.
 fn show_overlay(app: &tauri::AppHandle) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;

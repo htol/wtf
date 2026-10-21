@@ -107,8 +107,8 @@ pub fn run() {
 			app.manage(pipeline::Dictation::new());
 		// The overlay is unmapped while idle and only mapped by the pipeline
 		// while recording (GTK3 cannot resize a mapped Wayland toplevel, so
-		// show/hide replaced the old collapse-to-1x1). Keeping it from stealing
-		// focus on map is the compositor's job (Hyprland: no_initial_focus rule).
+		// show/hide replaced the old collapse-to-1x1). On Wayland it is a
+		// layer-shell surface, which the compositor never focuses.
 		pipeline::prime_overlay(app.handle());
 			spawn_hotkeys(app.handle().clone());
 			// Ask for the paste permission at launch rather than after the
@@ -157,7 +157,9 @@ pub fn run() {
 			asr::list_gpu_devices,
 			qwen::list_qwen_devices,
 			hotkey::rebind_shortcuts,
-			pipeline::unload_model
+			pipeline::unload_model,
+			pipeline::overlay_is_layer,
+			pipeline::shift_overlay
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

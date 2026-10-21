@@ -82,39 +82,17 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
 
 ## Wayland notes
 
-- The recording overlay needs a KWin window rule: xdg-shell has no
-  keep-above, so `alwaysOnTop` from the app is ignored. Add to
-  `~/.config/kwinrulesrc` (and `qdbus org.kde.KWin /KWin reconfigure` or
-  re-login — KWin applies rules when a window is created, so restart the
-  service afterwards):
-
-  ```ini
-  [General]
-  rules=1
-
-  [1]
-  Description=wtf overlay: keep above, skip taskbar and switcher, remember position
-  title=wtf-overlay
-  titlematch=1
-  above=true
-  aboverule=3
-  skiptaskbar=true
-  skiptaskbarrule=3
-  skipswitcher=true
-  skipswitcherrule=3
-  positionrule=2
-  acceptfocus=false
-  acceptfocusrule=2
-  types=1
-  ```
-
-  Every property needs its paired `*rule=N` field; without it KWin silently
-  ignores the property. Values: 2 = Force, 3 = Apply initially, 4 = Remember
-  (`rules.h`). `acceptfocus` is force-only, so it must be 2: the overlay is
-  mapped on every recording (see the Hyprland note below) and without it
-  KWin activates the new window and the dictation target loses focus.
-  `positionrule=2` makes KWin store the overlay position — client-side
-  positioning is impossible on Wayland.
+- The recording overlay is a wlr-layer-shell surface (gtk-layer-shell;
+  KWin since Plasma 5.20, Hyprland, Sway). xdg-shell has no keep-above, no
+  client-side position and no way to refuse focus, so a plain window would
+  need compositor rules and every map (the overlay is shown on each
+  recording — GTK3 cannot resize a mapped Wayland toplevel) would activate
+  it and take focus from the dictation target. As a layer surface it sits
+  in the overlay layer, never gets keyboard focus and places itself from
+  the saved position; drag the pill to move it. No KWin or Hyprland window
+  rules are needed. Runtime dependency: the `gtk-layer-shell` library
+  (Arch `gtk-layer-shell`, Debian `libgtk-layer-shell0`). On X11 the
+  overlay stays a plain window.
 
 ### Hyprland
 
@@ -131,20 +109,6 @@ There is no binding dialog — that is a Plasma feature. With
 
 ```ini
 bind = ALT, grave, global, wtf:record
-```
-
-The overlay rules replace the KWin rule above (0.56 syntax; every field is
-`<effect> <value>` or `match:<prop> <value>`). `pin` covers keep-above.
-`no_initial_focus` matters because the overlay is mapped on every recording
-(GTK3 cannot resize a mapped Wayland toplevel — `gtk_window_resize` is
-silently ignored after map — so the app shows/hides it instead of resizing)
-and the map must not steal focus from the dictation target.
-
-```ini
-windowrule = float true, match:title ^(wtf-overlay)$
-windowrule = pin true, match:title ^(wtf-overlay)$
-windowrule = decorate false, match:title ^(wtf-overlay)$
-windowrule = no_initial_focus true, match:title ^(wtf-overlay)$
 ```
 
 ## NVIDIA note

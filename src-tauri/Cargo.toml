@@ -56,6 +56,8 @@ base64 = "0.22"
 # Global shortcuts and the notification go through xdg-desktop-portal.
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13", features = ["global_shortcuts", "notification"] }
+gtk = "0.18"
+gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 
 # macOS has no portal: shortcuts are registered by the app itself.
 [target.'cfg(target_os = "macos")'.dependencies]

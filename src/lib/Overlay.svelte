@@ -10,6 +10,9 @@
 	let level = $state(0);
 	let language = $state('auto');
 	let errorMessage = $state<string | null>(null);
+	// Linux/Wayland: the overlay is a layer-shell surface, which the
+	// compositor cannot move, so it moves itself (see pipeline::shift_overlay).
+	let layer = $state(false);
 	// Collapsed = 1x1 invisible idle state (the window stays mapped; see
 	// pipeline::prime_overlay). Expanded = recording pill.
 	let collapsed = $state(true);
@@ -35,6 +38,41 @@
 				y: Math.min(1, Math.max(0, y))
 			});
 		}, 400);
+	}
+
+	// Drag of the layer surface. Each step sends the pointer's offset from
+	// where the drag started, in the window's own coordinates: once the
+	// surface has moved under the pointer the offset is back to zero, so a
+	// late or dropped step corrects itself instead of accumulating. One step
+	// in flight at a time.
+	let drag: { x: number; y: number } | null = null;
+	let dragBusy = false;
+	function onPointerDown(event: PointerEvent) {
+		if (!layer || event.button !== 0) return;
+		drag = { x: event.clientX, y: event.clientY };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+	}
+	async function onPointerMove(event: PointerEvent) {
+		if (!drag || dragBusy) return;
+		const dx = Math.round(event.clientX - drag.x);
+		const dy = Math.round(event.clientY - drag.y);
+		if (dx === 0 && dy === 0) return;
+		dragBusy = true;
+		try {
+			await invoke('shift_overlay', { dx, dy, persist: false });
+		} finally {
+			dragBusy = false;
+		}
+	}
+	function onPointerUp() {
+		if (!drag) return;
+		drag = null;
+		invoke('shift_overlay', { dx: 0, dy: 0, persist: true });
+	}
+	// Tauri's drag-region script listens on document mousedown and would ask
+	// the compositor to move the window; a layer surface has no such move.
+	function onMouseDown(event: MouseEvent) {
+		if (layer) event.stopPropagation();
 	}
 
 	onMount(() => {
@@ -64,7 +102,12 @@
 			status = 'error';
 			errorMessage = event.payload;
 		});
-		const unlistenMoved = getCurrentWindow().onMoved(() => scheduleSave());
+		// A layer surface reports no position: its moves are saved by
+		// shift_overlay, and a moved event would only store zeros.
+		const unlistenMoved = invoke<boolean>('overlay_is_layer').then((isLayer) => {
+			layer = isLayer;
+			return isLayer ? () => {} : getCurrentWindow().onMoved(() => scheduleSave());
+		});
 		return () => {
 			unlistenRecording.then((u) => u());
 			unlistenProcessing.then((u) => u());
@@ -76,7 +119,16 @@
 	});
 </script>
 
-<div class="overlay" class:collapsed data-tauri-drag-region>
+<div
+	class="overlay"
+	class:collapsed
+	data-tauri-drag-region
+	onmousedown={onMouseDown}
+	onpointerdown={onPointerDown}
+	onpointermove={onPointerMove}
+	onpointerup={onPointerUp}
+	onpointercancel={onPointerUp}
+>
 	{#if status === 'recording'}
 		<span class="dot recording" data-tauri-drag-region></span>
 	{:else if status === 'processing'}
