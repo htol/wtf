@@ -183,6 +183,19 @@ mod overlay_layer {
 				(settings.overlay_y * geometry.height() as f64) as i32,
 			);
 		}
+		// Warm-up map: into the first layer surface of this window GTK never
+		// draws a frame (the pill maps but stays empty, and WebKit later
+		// paints it at the wrong size); a surface mapped after a configured
+		// and unmapped one draws right after configure. Realizing ahead or
+		// an unmap before the configure arrives do not help, so the window
+		// stays mapped briefly. Nothing is drawn into it, so nothing
+		// flashes.
+		let _ = window.show();
+		let warm = window.clone();
+		std::thread::spawn(move || {
+			std::thread::sleep(std::time::Duration::from_millis(300));
+			let _ = warm.hide();
+		});
 		ACTIVE.store(true, Ordering::Release);
 	}
 

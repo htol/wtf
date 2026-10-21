@@ -4,9 +4,7 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-# NVIDIA proprietary driver + WebKitGTK on Wayland: the DMA-BUF renderer
-# raises Wayland protocol errors (Error 71). See README "NVIDIA note".
-Environment=WEBKIT_DISABLE_DMABUF_RENDERER=1
+# NVIDIA proprietary driver: see README "NVIDIA note" for the drop-in.
 ExecStart=%h/.local/bin/wtf
 Restart=on-failure
 RestartSec=3

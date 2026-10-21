@@ -114,5 +114,15 @@ bind = ALT, grave, global, wtf:record
 ## NVIDIA note
 
 WebKitGTK's DMA-BUF renderer crashes with `Error 71 (Protocol error)` on the
-NVIDIA proprietary driver under Wayland, so the systemd unit sets
-`WEBKIT_DISABLE_DMABUF_RENDERER=1`. If launched manually, export it first.
+NVIDIA proprietary driver under Wayland. There, disable it with a drop-in
+(`systemctl --user edit app-wtf.service`):
+
+```ini
+[Service]
+Environment=WEBKIT_DISABLE_DMABUF_RENDERER=1
+```
+
+Do not set it elsewhere: without the DMA-BUF renderer WebKitGTK paints only
+the composited layers of the transparent overlay (the waveform bars, not
+the pill behind them) — on AMD/radv at least. If launched manually on
+NVIDIA, export the variable first.
