@@ -101,7 +101,8 @@ pub fn toggle_record(app: &tauri::AppHandle) {
 /// map — the compositor owns the size), so the overlay is shown/hidden
 /// instead of collapsed to 1x1. `set_focusable(false)` must run before the
 /// first `show()`; on Wayland first maps can activate the window, so the
-/// compositor config must keep it out of focus (Hyprland: `no_initial_focus`).
+/// compositor config must keep it out of focus (Hyprland: `no_initial_focus`,
+/// KWin: `acceptfocus=false` rule).
 pub fn prime_overlay(app: &tauri::AppHandle) {
 	let Some(window) = app.get_webview_window("overlay") else {
 		return;

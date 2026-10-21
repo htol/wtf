@@ -103,12 +103,18 @@ Building needs `cmake` (whisper.cpp): `brew install cmake`.
   skipswitcher=true
   skipswitcherrule=3
   positionrule=2
+  acceptfocus=false
+  acceptfocusrule=2
   types=1
   ```
 
-  Every property needs its paired `*rule=3` (Force) field; without them KWin
-  silently ignores the rule. `positionrule=2` (Remember) makes KWin store the
-  overlay position — client-side positioning is impossible on Wayland.
+  Every property needs its paired `*rule=N` field; without it KWin silently
+  ignores the property. Values: 2 = Force, 3 = Apply initially, 4 = Remember
+  (`rules.h`). `acceptfocus` is force-only, so it must be 2: the overlay is
+  mapped on every recording (see the Hyprland note below) and without it
+  KWin activates the new window and the dictation target loses focus.
+  `positionrule=2` makes KWin store the overlay position — client-side
+  positioning is impossible on Wayland.
 
 ### Hyprland
 
