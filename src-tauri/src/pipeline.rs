@@ -170,7 +170,7 @@ mod overlay_layer {
 		gtk.set_anchor(Edge::Top, true);
 		// Pin the surface to one output so the margins and the saved
 		// fractions refer to the same monitor.
-		if let Some(monitor) = default_monitor(&gtk) {
+		if let Some(monitor) = home_monitor(&gtk) {
 			gtk.set_monitor(&monitor);
 			let settings = settings::load();
 			let geometry = monitor.geometry();
@@ -186,9 +186,23 @@ mod overlay_layer {
 		ACTIVE.store(true, Ordering::Release);
 	}
 
-	fn default_monitor(gtk: &gtk::ApplicationWindow) -> Option<gdk::Monitor> {
+	/// The monitor the overlay lives on. Wayland has no primary-monitor
+	/// notion GDK could report, and GDK's monitor 0 is merely the output
+	/// the compositor advertised first; the layout origin is where KDE and
+	/// most compositors put the primary screen, so prefer the monitor that
+	/// contains it.
+	fn home_monitor(gtk: &gtk::ApplicationWindow) -> Option<gdk::Monitor> {
 		let display = gtk.display();
-		display.primary_monitor().or_else(|| display.monitor(0))
+		if let Some(primary) = display.primary_monitor() {
+			return Some(primary);
+		}
+		(0..display.n_monitors())
+			.filter_map(|i| display.monitor(i))
+			.find(|m| {
+				let g = m.geometry();
+				g.x() <= 0 && 0 < g.x() + g.width() && g.y() <= 0 && 0 < g.y() + g.height()
+			})
+			.or_else(|| display.monitor(0))
 	}
 
 	/// Moves the surface by `dx`/`dy` logical pixels, clamped to the
@@ -197,7 +211,7 @@ mod overlay_layer {
 		let Ok(gtk) = window.gtk_window() else {
 			return;
 		};
-		let Some(monitor) = <gtk::ApplicationWindow as LayerShell>::monitor(&gtk).or_else(|| default_monitor(&gtk)) else {
+		let Some(monitor) = <gtk::ApplicationWindow as LayerShell>::monitor(&gtk).or_else(|| home_monitor(&gtk)) else {
 			return;
 		};
 		let geometry = monitor.geometry();
@@ -234,7 +248,9 @@ pub fn overlay_is_layer() -> bool {
 
 /// Drag step from the overlay window (logical pixels); `persist` on the
 /// final step saves the position. No-op unless the overlay is a layer
-/// surface. GTK calls must run on the main thread.
+/// surface. GTK calls must run on the main thread; the command returns
+/// only once the step is applied, so the overlay can pace its steps on
+/// the surface actually having moved.
 #[tauri::command]
 pub fn shift_overlay(app: tauri::AppHandle, dx: i32, dy: i32, persist: bool) {
 	#[cfg(target_os = "linux")]
@@ -242,12 +258,15 @@ pub fn shift_overlay(app: tauri::AppHandle, dx: i32, dy: i32, persist: bool) {
 		if !overlay_layer::active() {
 			return;
 		}
+		let (done, applied) = std::sync::mpsc::channel();
 		let handle = app.clone();
 		let _ = app.run_on_main_thread(move || {
 			if let Some(window) = handle.get_webview_window("overlay") {
 				overlay_layer::shift(&window, dx, dy, persist);
 			}
+			let _ = done.send(());
 		});
+		let _ = applied.recv_timeout(std::time::Duration::from_millis(100));
 	}
 	#[cfg(not(target_os = "linux"))]
 	{
@@ -255,7 +274,7 @@ pub fn shift_overlay(app: tauri::AppHandle, dx: i32, dy: i32, persist: bool) {
 	}
 }
 
-/// Maps the overlay at its recording size (260x30 from the window config).
+/// Maps the overlay at its recording size (380x64 from the window config).
 /// Positioning: layer-shell margins on Wayland (see `overlay_layer`), the
 /// saved position on macOS, the window manager elsewhere.
 fn show_overlay(app: &tauri::AppHandle) {

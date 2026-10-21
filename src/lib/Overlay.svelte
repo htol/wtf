@@ -13,9 +13,43 @@
 	// Linux/Wayland: the overlay is a layer-shell surface, which the
 	// compositor cannot move, so it moves itself (see pipeline::shift_overlay).
 	let layer = $state(false);
-	// Collapsed = 1x1 invisible idle state (the window stays mapped; see
-	// pipeline::prime_overlay). Expanded = recording pill.
-	let collapsed = $state(true);
+
+	// Live waveform: bar heights (0..1) eased towards a target shaped by the
+	// microphone RMS (`level`, ~10 Hz) and a per-bar wobble, so the bars keep
+	// moving between level updates instead of stepping.
+	const BARS = 18;
+	const phases = Array.from({ length: BARS }, () => Math.random() * Math.PI * 2);
+	let bars = $state(Array.from({ length: BARS }, () => 0.12));
+	function animate(now: number) {
+		const amp = Math.min(1, Math.sqrt(Math.min(1, level * 6)));
+		const t = now / 1000;
+		bars = bars.map((current, i) => {
+			const mid = (BARS - 1) / 2;
+			const envelope = 1 - Math.abs(i - mid) / mid;
+			const wobble = 0.55 + 0.45 * Math.sin(t * 9 + phases[i]);
+			const target = 0.12 + amp * (0.3 + 0.7 * envelope) * wobble;
+			const ease = target > current ? 0.45 : 0.18;
+			return current + (target - current) * ease;
+		});
+	}
+	$effect(() => {
+		if (status !== 'recording') return;
+		let frame = requestAnimationFrame(function tick(now) {
+			animate(now);
+			frame = requestAnimationFrame(tick);
+		});
+		return () => cancelAnimationFrame(frame);
+	});
+
+	const label = $derived(
+		status === 'recording'
+			? 'Recording'
+			: status === 'processing'
+				? 'Transcribing…'
+				: status === 'error'
+					? (errorMessage ?? 'Error')
+					: ''
+	);
 
 	async function refreshLanguage() {
 		const settings = await invoke<{ language: string }>('get_settings');
@@ -44,7 +78,9 @@
 	// where the drag started, in the window's own coordinates: once the
 	// surface has moved under the pointer the offset is back to zero, so a
 	// late or dropped step corrects itself instead of accumulating. One step
-	// in flight at a time.
+	// at a time, and the next only after a frame has passed since the step
+	// was applied — the compositor moves the surface on the next commit, and
+	// a step sent before that would be measured against the old position.
 	let drag: { x: number; y: number } | null = null;
 	let dragBusy = false;
 	function onPointerDown(event: PointerEvent) {
@@ -60,6 +96,7 @@
 		dragBusy = true;
 		try {
 			await invoke('shift_overlay', { dx, dy, persist: false });
+			await new Promise(requestAnimationFrame);
 		} finally {
 			dragBusy = false;
 		}
@@ -77,12 +114,6 @@
 
 	onMount(() => {
 		refreshLanguage();
-		const win = getCurrentWindow();
-		const syncCollapsed = (size: { width: number }) => {
-			collapsed = size.width < 100;
-		};
-		win.innerSize().then(syncCollapsed);
-		const unlistenResized = win.onResized((event) => syncCollapsed(event.payload));
 		const unlistenRecording = listen<boolean>('recording', (event) => {
 			if (event.payload) {
 				status = 'recording';
@@ -114,14 +145,14 @@
 			unlistenLevel.then((u) => u());
 			unlistenError.then((u) => u());
 			unlistenMoved.then((u) => u());
-			unlistenResized.then((u) => u());
 		};
 	});
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -- a drag handle on a
+	window that never takes keyboard focus -->
 <div
-	class="overlay"
-	class:collapsed
+	class="frame"
 	data-tauri-drag-region
 	onmousedown={onMouseDown}
 	onpointerdown={onPointerDown}
@@ -129,27 +160,29 @@
 	onpointerup={onPointerUp}
 	onpointercancel={onPointerUp}
 >
-	{#if status === 'recording'}
-		<span class="dot recording" data-tauri-drag-region></span>
-	{:else if status === 'processing'}
-		<span class="dot processing" data-tauri-drag-region></span>
-	{:else if status === 'error'}
-		<span class="dot error" data-tauri-drag-region></span>
-	{/if}
-
-	{#if status === 'error' && errorMessage}
-		<span class="text error-text" data-tauri-drag-region>{errorMessage}</span>
-	{:else if status !== 'idle'}
-		<span class="text" data-tauri-drag-region>
-			{status === 'recording' ? 'recording' : 'transcribing'}
-		</span>
-		{#if status === 'recording'}
-			<span class="meter" data-tauri-drag-region>
-				<span class="fill" style="width: {Math.min(100, Math.pow(Math.min(1, level * 2), 0.25) * 100)}%"></span>
-			</span>
+	<div class="pill" class:error={status === 'error'} data-tauri-drag-region>
+		<div class="glyph" data-tauri-drag-region>
+			{#if status === 'recording'}
+				<div class="bars" data-tauri-drag-region>
+					{#each bars as height, i (i)}
+						<span class="bar" style="transform: scaleY({height})"></span>
+					{/each}
+				</div>
+			{:else if status === 'processing'}
+				<div class="bars busy" data-tauri-drag-region>
+					{#each phases as _, i (i)}
+						<span class="bar" style="animation-delay: {i * 55}ms"></span>
+					{/each}
+				</div>
+			{:else if status === 'error'}
+				<span class="alert" data-tauri-drag-region>!</span>
+			{/if}
+		</div>
+		<span class="text" class:error-text={status === 'error'} data-tauri-drag-region>{label}</span>
+		{#if status !== 'error'}
+			<span class="lang" data-tauri-drag-region>{language}</span>
 		{/if}
-		<span class="lang" data-tauri-drag-region>{language}</span>
-	{/if}
+	</div>
 </div>
 
 <style>
@@ -165,102 +198,123 @@
 		height: 100%;
 	}
 
-	.overlay {
+	/* The window is 380x64; the frame keeps 8px clear around the pill for
+	   its shadow (the window has no compositor shadow of its own). */
+	.frame {
+		box-sizing: border-box;
 		display: flex;
-		align-items: center;
-		gap: 8px;
 		height: 100%;
-		padding: 0 10px;
-		background: rgba(46, 52, 64, 0.92);
-		border: 1px solid var(--nord3);
-		border-radius: 10px;
+		padding: 8px;
 		cursor: grab;
 		user-select: none;
+		touch-action: none;
 	}
 
-	.overlay:active {
+	.frame:active {
 		cursor: grabbing;
 	}
 
-	.overlay.collapsed {
-		background: transparent;
-		border: none;
+	.pill {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-width: 0;
+		padding: 0 14px 0 16px;
+		background: rgba(46, 52, 64, 0.94);
+		border: 1px solid rgba(216, 222, 233, 0.14);
+		border-radius: 999px;
+		box-shadow:
+			0 6px 24px rgba(0, 0, 0, 0.45),
+			inset 0 1px 0 rgba(236, 239, 244, 0.06);
 	}
 
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
+	.pill.error {
+		border-color: rgba(191, 97, 106, 0.6);
+	}
+
+	.glyph {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 90px;
+		height: 28px;
 		flex-shrink: 0;
 	}
 
-	.dot.recording {
-		background: var(--nord11);
-		animation: pulse 1.2s ease-in-out infinite;
+	.bars {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		height: 100%;
 	}
 
-	.dot.processing {
-		background: transparent;
-		border: 2px solid var(--nord8);
-		border-top-color: transparent;
-		animation: spin 0.9s linear infinite;
+	.bar {
+		display: block;
+		width: 3px;
+		height: 100%;
+		border-radius: 2px;
+		background: var(--nord8);
+		transform: scaleY(0.12);
+		transform-origin: center;
 	}
 
-	.dot.error {
+	.bars.busy .bar {
+		background: var(--nord9);
+		animation: sweep 1.1s ease-in-out infinite;
+	}
+
+	.alert {
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
 		background: var(--nord11);
+		color: var(--nord6);
+		font-size: 14px;
+		font-weight: 700;
 	}
 
 	.text {
-		font-size: 11px;
-		color: var(--nord4);
-		white-space: nowrap;
-	}
-
-	.error-text {
-		color: var(--nord11);
+		flex: 1;
+		min-width: 0;
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 1;
+		letter-spacing: 0.01em;
+		color: var(--nord6);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
-	.meter {
-		flex: 1;
-		height: 4px;
-		min-width: 40px;
-		border-radius: 2px;
-		background: var(--nord1);
-		overflow: hidden;
-	}
-
-	.fill {
-		display: block;
-		height: 100%;
-		border-radius: 2px;
-		background: var(--nord8);
-		transition: width 100ms linear;
+	.error-text {
+		color: var(--nord11);
 	}
 
 	.lang {
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: var(--nord7);
 		flex-shrink: 0;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: rgba(136, 192, 208, 0.14);
+		color: var(--nord8);
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 
-	@keyframes pulse {
+	@keyframes sweep {
 		0%,
 		100% {
-			opacity: 1;
+			transform: scaleY(0.15);
+			opacity: 0.5;
 		}
 		50% {
-			opacity: 0.35;
-		}
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
+			transform: scaleY(0.9);
+			opacity: 1;
 		}
 	}
 </style>
