@@ -214,8 +214,10 @@
 		cursor: grabbing;
 	}
 
+	/* Hugs its content; only an error message may stretch to the window. */
 	.pill {
-		flex: 1;
+		flex: 0 1 auto;
+		max-width: 100%;
 		display: flex;
 		align-items: center;
 		gap: 12px;
@@ -277,7 +279,7 @@
 	}
 
 	.text {
-		flex: 1;
+		flex: 0 1 auto;
 		min-width: 0;
 		font-size: 14px;
 		font-weight: 500;
